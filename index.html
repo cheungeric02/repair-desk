@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Repair Desk</title>
 <meta name="theme-color" content="#1b5e9e">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" crossorigin=""/>
 <script>/* anti-flash theme */try{var t=localStorage.getItem('repairdesk_theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.setAttribute('data-theme','dark');}catch(e){}</script>
 <style>
@@ -202,6 +205,10 @@ main{padding:14px 16px 90px;max-width:1200px;margin:0 auto}
   <input id="lockPw" type="password" autocomplete="current-password" placeholder="passcode">
   <button class="btn pri" id="lockGo" style="width:100%;justify-content:center">Unlock</button>
   <p class="hint" id="lockErr" style="color:var(--bad);min-height:16px"></p>
+  <div id="lockWait" class="hide" style="display:flex;flex-direction:column;gap:8px">
+    <button class="btn pri" id="lockRetry" style="width:100%;justify-content:center">Retry</button>
+    <button class="btn" id="lockOffline" style="width:100%;justify-content:center">View offline copy</button>
+  </div>
 </div></div>
 
 <header>
@@ -343,11 +350,17 @@ main{padding:14px 16px 90px;max-width:1200px;margin:0 auto}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin=""></script>
 <script>
 /* ===================== Repair Desk — app logic ===================== */
-const APP_VERSION = 1;
+const APP_VERSION = 2;   // MUST equal the cache number in sw.js (rd-shell-vN)
 const LS = { data:'repairdesk_data', theme:'repairdesk_theme', admin:'repairdesk_admin', seen:'repairdesk_lastSeenVer' };
 let SYNC_ENABLED = false;   // flipped on by the Firebase module once a secured project is configured AND the user is signed in
 
 const PATCH_NOTES = [
+  { v:2, date:'2026-11-21', title:'Share texts straight in', notes:[
+    'Install Repair Desk on your phone (Chrome ⋮ → Install app), then long-press a text in Messages → Share → Repair Desk to start a new job with the details filled in.',
+    'Smarter parsing: handles a whole request on one line, and text after the serial number becomes the reported issue.',
+    'Waits for your jobs to load from the cloud before you can edit, so a stale copy on one device can’t overwrite the others.',
+    'No signal? You can still open your last-synced jobs to look at; saving changes needs a connection.'
+  ]},
   { v:1, date:'2026-11-20', title:'First release', notes:[
     'Job workspace with status pipeline: New → Scheduled → Evaluated → Parts ordered → Parts arrived → Completed.',
     'Paste an SMS/email to auto-create a job.',
@@ -414,6 +427,9 @@ function jobsArr(){ return Object.values(STATE.jobs); }
 
 /* ---- persistence ---- */
 function persist(){
+  // Cloud mode: never write before the first cloud snapshot has loaded — a stale local copy would
+  // overwrite every other device's changes (the whole blob is replaced on each write).
+  if(window.__fbConfigured && !window.__cloudReady){ toast('Not saved — no connection to the cloud yet. Reconnect, then try again.'); return; }
   STATE.savedAt=Date.now();
   try{ localStorage.setItem(LS.data, JSON.stringify(STATE)); }catch(e){ console.warn('save',e); }
   if(SYNC_ENABLED && window.__fbWrite) window.__fbWrite(STATE);
@@ -891,28 +907,52 @@ function renderAgenda(){
 }
 
 /* ===================== INTAKE PARSE ===================== */
-function parseIntake(text){
-  // split inline labels ("Model: X  Serial: Y" on one line) onto their own lines so each grabs cleanly
-  text = text.replace(/\s+(Serial(?:\s*#|\s*no\.?|\s*number)?|SN|Model(?:\s*#|\s*no\.?|\s*number)?|Phone|Tel|Mobile|Email|Address|Case(?:\s*#|\s*no\.?|\s*number)?|Service Order(?:\s*#)?|Order(?:\s*#|\s*no\.?)?|Service Job ID|Job(?:\s*#|\s*ID)?|Warranty)\s*:/gi, '\n$1:');
-  const grab=labels=>{ for(const l of labels){ const m=text.match(new RegExp('(?:^|\\n)\\s*'+l+'\\s*[:\\-]\\s*(.+)','i')); if(m) return m[1].trim(); } return ''; };
-  const o={};
-  o.customer=grab(['name','customer','client','cust']);
-  o.email=(text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)||[''])[0];
-  let ph=(text.match(/(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/)||[''])[0];
-  if(ph){ const dd=ph.replace(/\D/g,'').slice(-10); if(dd.length===10) ph=`(${dd.slice(0,3)}) ${dd.slice(3,6)}-${dd.slice(6)}`; }
-  o.phone=ph;
-  o.address=grab(['address','addr','location','service address']);
-  o.model=grab(['model','model #','model no','model number']);
-  o.serial=grab(['serial','serial #','sn','serial number']);
-  o.serviceOrder=grab(['service order','service order #','so','order #','order no','order']);
-  o.caseNo=grab(['case','case #','case no','case number']);
-  o.jobId=grab(['job id','service job id','job #','job']);
-  o.issue=grab(['issue','problem','fault','symptom','complaint','concern','re','regarding']);
-  if(!o.issue){
-    // fall back: strip label lines, keep the rest as the issue
-    const lines=text.split('\n').filter(ln=>!/^\s*(name|customer|client|cust|phone|tel|mobile|email|address|addr|location|model|serial|sn|service order|order|case|job)\s*[:\-]/i.test(ln));
-    o.issue=lines.join(' ').trim() || text.trim();
+const PHONE_RE=/(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/;
+function fmtPhone(ph){ const dd=String(ph||'').replace(/\D/g,''); const d10=(dd.length===11&&dd[0]==='1')?dd.slice(1):dd; return d10.length===10?`(${d10.slice(0,3)}) ${d10.slice(3,6)}-${d10.slice(6)}`:String(ph||'').trim(); }
+/* Label → field. Order matters: longer labels first so "Service Order" beats "Order". */
+const INTAKE_LABELS=[
+  ['serviceOrder','Service\\s*Order(?:\\s*(?:#|No\\.?|Number))?|S\\.?O\\.?(?:\\s*#)?|Order(?:\\s*(?:#|No\\.?|Number))?'],
+  ['jobId','Service\\s*Job(?:\\s*(?:ID|#|No\\.?))?|Job(?:\\s*(?:ID|#|No\\.?|Number))?'],
+  ['caseNo','Case(?:\\s*(?:#|No\\.?|Number))?'],
+  ['customer','Customer(?:\\s*Name)?|Client(?:\\s*Name)?|Full\\s*Name|Name'],
+  ['phone','Phone(?:\\s*(?:#|No\\.?|Number))?|Tel(?:ephone)?|Mobile|Cell(?:\\s*Phone)?'],
+  ['email','E-?mail(?:\\s*Address)?'],
+  ['address','Service\\s*Address|Address|Addr\\.?|Location'],
+  ['model','Model(?:\\s*(?:#|No\\.?|Number))?'],
+  ['serial','Serial(?:\\s*(?:#|No\\.?|Number))?|S\\/N|SN'],
+  ['warranty','Warranty(?:\\s*Status)?'],
+  ['issue','Issue|Problem|Fault|Symptoms?|Complaint|Concern|Description|Notes?']
+];
+const SINGLE_TOKEN=new Set(['model','serial','serviceOrder','caseNo','jobId','email']);
+function parseIntake(raw){
+  let text=String(raw||'').replace(/\r/g,'');
+  const all=INTAKE_LABELS.map(x=>x[1]).join('|');
+  // put every "Label:" on its own line, so a whole request typed on one line still splits cleanly
+  text=text.replace(new RegExp('(^|[\\s,;|])('+all+')\\s*[:=]','gi'), (m,pre,l)=>'\n'+l+':');
+  const labelRes=INTAKE_LABELS.map(([k,re])=>[k,new RegExp('^\\s*(?:'+re+')\\s*:\\s*(.*)$','i')]);
+  const o={customer:'',phone:'',email:'',address:'',model:'',serial:'',serviceOrder:'',caseNo:'',jobId:'',warranty:'',issue:''};
+  const extra=[];   // unlabelled text + anything trailing a single-value field → reported issue
+  for(const line of text.split('\n')){
+    if(!line.trim()) continue;
+    let hit=null;
+    for(const [k,re] of labelRes){ const m=line.match(re); if(m){ hit=[k,m[1].trim()]; break; } }
+    if(!hit){ extra.push(line.trim()); continue; }
+    let [k,v]=hit;
+    if(k==='phone'){
+      const pm=v.match(PHONE_RE);
+      if(pm){ const rest=(v.slice(0,pm.index)+' '+v.slice(pm.index+pm[0].length)).trim(); if(rest) extra.push(rest); v=pm[0]; }
+    } else if(SINGLE_TOKEN.has(k)){
+      const parts=v.split(/\s+/); v=parts.shift()||''; if(parts.length) extra.push(parts.join(' '));
+    }
+    v=v.replace(/^[\s,;.:-]+|[\s,;]+$/g,'');
+    if(k==='issue'){ if(v) extra.unshift(v); continue; }
+    if(!o[k]) o[k]=v;
   }
+  let issue=extra.join(' ');
+  if(!o.email){ const em=issue.match(/[\w.+-]+@[\w-]+\.[\w.-]+/); if(em){ o.email=em[0]; issue=issue.replace(em[0],' '); } }
+  if(!o.phone){ const pm=issue.match(PHONE_RE); if(pm){ o.phone=pm[0]; issue=issue.replace(pm[0],' '); } }
+  o.phone=fmtPhone(o.phone);
+  o.issue=issue.replace(/\s+/g,' ').replace(/\s+([,;.])/g,'$1').replace(/^[\s,;.-]+/,'').trim();
   return o;
 }
 function showParsePreview(o){
@@ -933,6 +973,7 @@ function showParsePreview(o){
     <div class="field full" style="margin-top:10px"><label>Reported issue</label><textarea id="pp_issue">${esc(o.issue||'')}</textarea></div>
     <div style="display:flex;gap:8px;margin-top:12px"><button class="btn pri" id="createFromIntake">Create job →</button></div>`;
   $('#createFromIntake').onclick=()=>{
+    if(window.__fbConfigured && !window.__cloudReady){ toast('Can’t save yet — waiting for the cloud. Reconnect, then tap Create again.'); return; }
     const g=k=>{ const e=$('#pp_'+k); return e?e.value.trim():''; };
     const j=newJob({ customer:g('customer'),phone:g('phone'),address:g('address'),email:g('email'),
       model:g('model'),serial:g('serial'),serviceOrder:g('serviceOrder'),caseNo:g('caseNo'),jobId:g('jobId'),
@@ -991,10 +1032,28 @@ function lockApp(){
   $('#lockMsg').textContent = fb ? 'Sign in with your Repair Desk account' : 'Enter your passcode';
   $('#lockPw').placeholder = fb ? 'password' : 'passcode';
   $('#lockGo').textContent = fb ? 'Sign in' : 'Unlock';
+  $('#lockPw').classList.remove('hide'); $('#lockGo').classList.remove('hide'); $('#lockWait').classList.add('hide');
   $('#lock').classList.add('open'); $('#lockPw').value=''; $('#lockErr').textContent='';
   setTimeout(()=>{ (fb?$('#lockEmail'):$('#lockPw')).focus(); },50);
 }
 function unlockOK(){ try{ sessionStorage.setItem(LS.admin,'1'); }catch(e){} $('#lock').classList.remove('open'); }
+/* Signed in, waiting for the first cloud snapshot. stage: 'loading' | 'slow' | 'error' */
+let cloudWaitTimer=null;
+function showCloudWait(stage, detail){
+  $('#lockEmail').classList.add('hide'); $('#lockPw').classList.add('hide'); $('#lockGo').classList.add('hide');
+  $('#lockTitle').textContent='Repair Desk';
+  $('#lockMsg').textContent = stage==='loading' ? 'Loading your jobs…' : 'Can’t reach the cloud right now.';
+  $('#lockErr').textContent = stage==='error' ? (detail||'Sync error') : (stage==='slow' ? 'Check your signal, then retry.' : '');
+  $('#lockWait').classList.toggle('hide', stage==='loading');
+  $('#lock').classList.add('open');
+  clearTimeout(cloudWaitTimer);
+  if(stage==='loading') cloudWaitTimer=setTimeout(()=>{ if(!window.__cloudReady) showCloudWait('slow'); }, 12000);
+}
+function fbLockState(){
+  if(window.__cloudReady) unlockOK();
+  else if(window.__fbAuth==='in') showCloudWait('loading');
+  else lockApp();
+}
 async function tryUnlock(){
   if(fbMode()){
     const email=$('#lockEmail').value.trim(), pw=$('#lockPw').value;
@@ -1009,7 +1068,7 @@ async function tryUnlock(){
   else { $('#lockErr').textContent='Wrong passcode'; $('#lockPw').select(); }
 }
 function maybeLock(){
-  if(fbMode()){ lockApp(); return; }          // cloud mode: always require sign-in
+  if(fbMode()){ fbLockState(); return; }      // cloud mode: sign-in, then wait for the first cloud snapshot
   if(!STATE.settings.pwHash) return;           // local mode, no passcode set
   let unlocked=false; try{ unlocked=sessionStorage.getItem(LS.admin)==='1'; }catch(e){}
   if(!unlocked) lockApp();
@@ -1108,12 +1167,42 @@ function boot(){
   $('#lockGo').onclick=tryUnlock;
   $('#lockPw').onkeydown=e=>{ if(e.key==='Enter') tryUnlock(); };
   $('#lockEmail').onkeydown=e=>{ if(e.key==='Enter') tryUnlock(); };
+  $('#lockRetry').onclick=()=>location.reload();
+  $('#lockOffline').onclick=()=>{ unlockOK(); toast('Offline copy — view only until you reconnect'); };
   // overlays: close buttons + click-outside
   $$('[data-close]').forEach(b=>b.onclick=()=>b.closest('.overlay').classList.remove('open'));
   $$('.overlay').forEach(o=>o.onclick=e=>{ if(e.target===o) o.classList.remove('open'); });
 
   maybeLock();
   checkWhatsNew(fresh);
+
+  // installable app + "Share → Repair Desk" (the service worker receives the shared text)
+  if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
+    navigator.serviceWorker.register('sw.js').catch(e=>console.warn('sw',e));
+  }
+  consumeShared();
+}
+/* Opened via Android Share: sw.js stashed the text in the 'rd-share' cache and redirected to ?shared=1.
+   (POST + cache keeps the customer's details out of the URL and out of server logs.) */
+async function consumeShared(){
+  if(!new URLSearchParams(location.search).has('shared')) return;
+  const key=new URL('__shared', location.href).href;
+  try{ history.replaceState(null,'',location.pathname); }catch(e){}
+  let text='';
+  try{
+    if('caches' in window){
+      const c=await caches.open('rd-share'); const r=await c.match(key);
+      if(r){ const d=await r.json(); text=d.text||''; }
+      await c.delete(key);
+    }
+  }catch(e){ console.warn('share',e); }
+  if(!text.trim()){ toast('Nothing came through from Share — try Paste instead'); return; }
+  openIntakeWith(text);
+}
+function openIntakeWith(text){
+  $('#intakeText').value=text;
+  openOverlay('#intakeOverlay');
+  showParsePreview(parseIntake(text));
 }
 function toggleTheme(){
   const dark=document.documentElement.getAttribute('data-theme')==='dark';
@@ -1140,8 +1229,15 @@ window.__setSync = s => {
   else if(s==='err'){ p.className='pill off'; p.innerHTML='<span class="dot" style="background:var(--bad)"></span>Sync error'; }
   else { p.className='pill off'; p.innerHTML='<span class="dot"></span>Local only'; }
 };
-window.__onSignedIn = user => { SYNC_ENABLED=true; unlockOK(); $('#syncPill').title = user&&user.email ? ('Signed in as '+user.email) : ''; };
-window.__onSignedOut = () => { SYNC_ENABLED=false; window.__setSync('off'); lockApp(); };
+window.__onSignedIn = user => {
+  SYNC_ENABLED=true; window.__fbAuth='in';
+  const p=$('#syncPill'); if(p) p.title = user&&user.email ? ('Signed in as '+user.email) : '';
+  if(document.readyState!=='loading') fbLockState();   // before boot, boot's maybeLock handles it
+};
+// first cloud snapshot has been applied (or the empty cloud was seeded) — safe to edit now
+window.__onCloudReady = () => { window.__cloudReady=true; clearTimeout(cloudWaitTimer); if(document.readyState!=='loading') unlockOK(); };
+window.__onCloudError = msg => { if(!window.__cloudReady && window.__fbAuth==='in' && document.readyState!=='loading') showCloudWait('error', msg); };
+window.__onSignedOut = () => { SYNC_ENABLED=false; window.__fbAuth='out'; window.__cloudReady=false; window.__setSync('off'); if(document.readyState!=='loading') lockApp(); };
 
 document.addEventListener('DOMContentLoaded',boot);
 </script>
@@ -1174,7 +1270,7 @@ if(configured){
     const auth = getAuth(app);
     const db = getDatabase(app);
     const node = ref(db, 'repairdesk/main');
-    let echo = false, pushedInitial = false;
+    let echo = false, pushedInitial = false, unsub = null;
 
     try{ await setPersistence(auth, browserLocalPersistence); }catch(e){}
 
@@ -1190,14 +1286,18 @@ if(configured){
     onAuthStateChanged(auth, user => {
       if(user){
         window.__onSignedIn && window.__onSignedIn(user);
-        onValue(node, snap => {
-          if(echo) return;                       // ignore our own write echo
+        let ready = false;
+        if(unsub){ try{ unsub(); }catch(e){} }
+        unsub = onValue(node, snap => {
+          if(echo && ready) return;              // ignore our own write echo
           const v = snap.val();
           if(v){ window.__applyRemote && window.__applyRemote(v); }
           else if(!pushedInitial){ pushedInitial=true; try{ window.__fbWrite(window.__getState()); }catch(e){} } // seed empty cloud from local
           window.__setSync && window.__setSync('on');
-        }, err => { console.warn('fb read',err); window.__setSync && window.__setSync('err'); });
+          if(!ready){ ready = true; window.__onCloudReady && window.__onCloudReady(); }
+        }, err => { console.warn('fb read',err); window.__setSync && window.__setSync('err'); window.__onCloudError && window.__onCloudError(err && err.code ? String(err.code) : 'Sync error'); });
       } else {
+        if(unsub){ try{ unsub(); }catch(e){} unsub = null; }
         window.__onSignedOut && window.__onSignedOut();
       }
     });
