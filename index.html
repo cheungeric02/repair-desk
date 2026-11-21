@@ -1,0 +1,1208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Repair Desk</title>
+<meta name="theme-color" content="#1b5e9e">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" crossorigin=""/>
+<script>/* anti-flash theme */try{var t=localStorage.getItem('repairdesk_theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.setAttribute('data-theme','dark');}catch(e){}</script>
+<style>
+:root{
+  --bg:#f4f6fb; --surface:#ffffff; --surface2:#eef2f9; --ink:#15233b; --muted:#5f6b80;
+  --line:#dde4ef; --primary:#1b5e9e; --primary-ink:#ffffff; --primary-soft:#e4eefb;
+  --accent:#6750a4; --radius:18px; --shadow:0 2px 10px rgba(20,40,80,.07),0 10px 30px rgba(20,40,80,.06);
+  --new:#e5484d; --scheduled:#f5a623; --evaluated:#4c6ef5; --ordered:#9b59b6; --arrived:#1faa59; --completed:#8794a8;
+  --good:#1faa59; --bad:#e5484d; --warn:#f5a623;
+}
+:root[data-theme="dark"]{
+  --bg:#0f1622; --surface:#18212f; --surface2:#1f2a3a; --ink:#e8eef7; --muted:#9aa7bd;
+  --line:#2b3850; --primary:#4f9be0; --primary-ink:#06101d; --primary-soft:#17304a;
+  --accent:#b9a7e6; --shadow:0 2px 10px rgba(0,0,0,.3),0 12px 30px rgba(0,0,0,.35);
+  --primary:#4f9be0;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);
+  -webkit-text-size-adjust:100%;line-height:1.4}
+h1,h2,h3{margin:0}
+button{font-family:inherit}
+input,select,textarea{font-family:inherit;font-size:15px}
+a{color:var(--primary)}
+.hide{display:none!important}
+
+/* header */
+header{position:sticky;top:0;z-index:40;background:color-mix(in srgb,var(--surface) 92%,transparent);
+  backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:10px 16px;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:19px}
+.logo{width:34px;height:34px;border-radius:11px;background:linear-gradient(135deg,var(--primary),var(--accent));
+  display:grid;place-items:center;color:#fff;font-size:19px;box-shadow:var(--shadow)}
+.grow{flex:1 1 auto}
+.hbtn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:12px;
+  padding:8px 11px;font-size:14px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.hbtn:hover{background:var(--surface2)}
+.pill{font-size:12px;font-weight:700;padding:5px 10px;border-radius:999px;display:inline-flex;align-items:center;gap:6px}
+.pill.on{background:color-mix(in srgb,var(--good) 16%,transparent);color:var(--good)}
+.pill.off{background:var(--surface2);color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+
+/* tabs */
+nav.tabs{display:flex;gap:6px;flex-wrap:wrap;padding:10px 16px 0;position:sticky;top:55px;z-index:30;background:var(--bg)}
+nav.tabs button{flex:0 1 auto;min-width:92px;border:1px solid var(--line);background:var(--surface);color:var(--muted);
+  border-radius:12px 12px 0 0;padding:9px 14px;font-weight:700;font-size:14px;cursor:pointer;border-bottom:none}
+nav.tabs button.active{background:var(--primary);color:var(--primary-ink);border-color:var(--primary)}
+
+main{padding:14px 16px 90px;max-width:1200px;margin:0 auto}
+.panel{display:none}
+.panel.active{display:block;animation:fade .2s ease}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* toolbar */
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.search{flex:1 1 220px;display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);
+  border-radius:12px;padding:9px 12px}
+.search input{border:0;outline:0;background:transparent;color:var(--ink);width:100%}
+.btn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:12px;padding:9px 14px;
+  font-weight:700;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{background:var(--surface2)}
+.btn.pri{background:var(--primary);color:var(--primary-ink);border-color:var(--primary)}
+.btn.pri:hover{filter:brightness(1.06)}
+.btn.sm{padding:6px 10px;font-size:13px;border-radius:10px}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 50%,var(--line))}
+.btn.danger:hover{background:color-mix(in srgb,var(--bad) 12%,transparent)}
+
+/* status chips */
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:999px;padding:6px 12px;
+  font-size:13px;font-weight:700;cursor:pointer}
+.chip.active{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.sbadge{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;padding:4px 10px;border-radius:999px;
+  color:#fff}
+.s-new{background:var(--new)} .s-scheduled{background:var(--scheduled)} .s-evaluated{background:var(--evaluated)}
+.s-parts_ordered{background:var(--ordered)} .s-parts_arrived{background:var(--arrived)} .s-completed{background:var(--completed)}
+
+/* job cards */
+.cards{display:grid;grid-template-columns:1fr;gap:12px}
+@media(min-width:680px){.cards{grid-template-columns:1fr 1fr}}
+@media(min-width:1040px){.cards{grid-template-columns:1fr 1fr 1fr}}
+.jcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px;box-shadow:var(--shadow);
+  cursor:pointer;border-left:5px solid var(--line);transition:transform .08s}
+.jcard:hover{transform:translateY(-2px)}
+.jcard.s-new{border-left-color:var(--new)} .jcard.s-scheduled{border-left-color:var(--scheduled)}
+.jcard.s-evaluated{border-left-color:var(--evaluated)} .jcard.s-parts_ordered{border-left-color:var(--ordered)}
+.jcard.s-parts_arrived{border-left-color:var(--arrived)} .jcard.s-completed{border-left-color:var(--completed);opacity:.82}
+.jcard h3{font-size:16px;margin-bottom:2px}
+.jcard .sub{color:var(--muted);font-size:13px;margin:2px 0}
+.jcard .row{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-top:8px}
+.jcard .ids{font-size:12px;color:var(--muted);font-family:ui-monospace,Consolas,monospace}
+.mini{font-size:12px;color:var(--muted);display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+.mini b{color:var(--ink)}
+.empty{text-align:center;color:var(--muted);padding:50px 10px}
+.empty .big{font-size:40px}
+
+/* stats */
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 14px;min-width:92px;flex:1 1 92px}
+.stat .n{font-size:22px;font-weight:800}
+.stat .l{font-size:12px;color:var(--muted);font-weight:600}
+
+/* overlays */
+.overlay{position:fixed;inset:0;background:rgba(10,20,40,.5);z-index:60;display:none;align-items:flex-start;justify-content:center;
+  padding:24px 14px;overflow:auto}
+.overlay.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);width:100%;max-width:760px;
+  padding:0;overflow:hidden;margin:auto}
+.modal .mhead{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line);
+  position:sticky;top:0;background:var(--surface);z-index:2}
+.modal .mhead h2{font-size:18px}
+.modal .mbody{padding:16px 18px}
+.modal .mfoot{display:flex;gap:8px;padding:14px 18px;border-top:1px solid var(--line);position:sticky;bottom:0;background:var(--surface);flex-wrap:wrap}
+.x{margin-left:auto;border:0;background:var(--surface2);color:var(--ink);width:34px;height:34px;border-radius:10px;cursor:pointer;font-size:18px}
+
+/* form */
+.sec{border:1px solid var(--line);border-radius:14px;margin:12px 0;overflow:hidden}
+.sec>summary{cursor:pointer;list-style:none;padding:12px 14px;font-weight:800;background:var(--surface2);display:flex;align-items:center;gap:8px}
+.sec>summary::-webkit-details-marker{display:none}
+.sec>summary::after{content:"▸";margin-left:auto;color:var(--muted);transition:.15s}
+.sec[open]>summary::after{transform:rotate(90deg)}
+.sec .inner{padding:12px 14px}
+.grid2{display:grid;grid-template-columns:1fr;gap:12px}
+@media(min-width:560px){.grid2{grid-template-columns:1fr 1fr}}
+.field{display:flex;flex-direction:column;gap:5px}
+.field.full{grid-column:1/-1}
+.field label{font-size:12px;font-weight:700;color:var(--muted)}
+.field .inwrap{display:flex;align-items:center;gap:6px}
+.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--ink);
+  border-radius:10px;padding:9px 11px;outline:none}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--primary)}
+.field textarea{resize:vertical;min-height:62px}
+.copybtn{border:1px solid var(--line);background:var(--surface);border-radius:9px;width:36px;height:38px;cursor:pointer;
+  flex:0 0 auto;font-size:15px;color:var(--muted)}
+.copybtn:hover{background:var(--primary-soft);color:var(--primary)}
+.hint{font-size:12px;color:var(--muted)}
+
+/* line-item lists */
+.litem{display:grid;gap:8px;align-items:end;border:1px dashed var(--line);border-radius:12px;padding:10px;margin-bottom:8px;background:var(--bg)}
+.litem .delrow{display:flex;justify-content:flex-end}
+.totrow{display:flex;justify-content:space-between;padding:6px 2px;font-size:14px}
+.totrow.big{font-weight:800;font-size:16px;border-top:1px solid var(--line);margin-top:6px;padding-top:10px}
+.callout{background:var(--primary-soft);border-radius:12px;padding:10px 12px;font-size:13px;color:var(--ink);margin:4px 0 10px}
+.tag{display:inline-block;font-size:11px;font-weight:800;padding:2px 8px;border-radius:999px;background:var(--surface2);color:var(--muted)}
+
+/* map */
+#map{height:min(68vh,620px);border-radius:16px;border:1px solid var(--line);box-shadow:var(--shadow);z-index:1}
+.legend{display:flex;gap:12px;flex-wrap:wrap;margin:10px 2px}
+.legend span{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);font-weight:600}
+.legend i{width:12px;height:12px;border-radius:50%;display:inline-block}
+.pin{width:20px;height:20px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+
+/* schedule */
+.agenda{display:flex;flex-direction:column;gap:10px}
+.ag{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:flex;gap:12px;align-items:center;
+  box-shadow:var(--shadow);border-left:5px solid var(--primary)}
+.ag.past{opacity:.6;border-left-color:var(--muted)}
+.ag .when{text-align:center;min-width:64px}
+.ag .when .d{font-size:20px;font-weight:800;line-height:1}
+.ag .when .mo{font-size:12px;color:var(--muted);text-transform:uppercase;font-weight:700}
+.ag .when .t{font-size:12px;color:var(--primary);font-weight:700;margin-top:3px}
+.ag .meat{flex:1}
+
+/* lock screen */
+#lock{position:fixed;inset:0;z-index:100;background:linear-gradient(135deg,var(--primary),var(--accent));display:none;
+  align-items:center;justify-content:center;padding:20px}
+#lock.open{display:flex}
+#lock .box{background:var(--surface);border-radius:22px;padding:28px;max-width:360px;width:100%;box-shadow:var(--shadow);text-align:center}
+#lock .box .logo{width:56px;height:56px;border-radius:16px;margin:0 auto 12px;font-size:30px}
+#lock input{width:100%;text-align:center;font-size:17px;letter-spacing:2px;border:1px solid var(--line);border-radius:12px;
+  padding:12px;margin:14px 0;background:var(--bg);color:var(--ink)}
+
+/* toast */
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);
+  padding:11px 18px;border-radius:12px;font-weight:700;font-size:14px;opacity:0;pointer-events:none;transition:.25s;z-index:120;box-shadow:var(--shadow)}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+.pn-entry{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px;background:var(--surface)}
+.pn-entry.pn-current{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-soft)}
+.pn-entry h4{margin:0 0 4px;font-size:14px}
+.pn-entry .pv{font-size:12px;color:var(--muted);font-weight:700}
+.pn-entry ul{margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--muted)}
+.leaflet-container{font:inherit}
+</style>
+</head>
+<body>
+
+<!-- LOCK SCREEN -->
+<div id="lock"><div class="box">
+  <div class="logo" style="background:linear-gradient(135deg,var(--primary),var(--accent))">🔧</div>
+  <h2 id="lockTitle">Repair Desk</h2>
+  <p class="hint" id="lockMsg">Enter your passcode</p>
+  <input id="lockEmail" class="hide" type="email" autocomplete="username" placeholder="email">
+  <input id="lockPw" type="password" autocomplete="current-password" placeholder="passcode">
+  <button class="btn pri" id="lockGo" style="width:100%;justify-content:center">Unlock</button>
+  <p class="hint" id="lockErr" style="color:var(--bad);min-height:16px"></p>
+</div></div>
+
+<header>
+  <div class="brand"><div class="logo">🔧</div><span>Repair Desk</span></div>
+  <span id="syncPill" class="pill off"><span class="dot"></span>Local only</span>
+  <span class="grow"></span>
+  <button class="hbtn" id="intakeBtn">✉️ Paste text/email</button>
+  <button class="hbtn" id="newBtn">＋ New job</button>
+  <button class="hbtn" id="themeBtn" title="Toggle theme">☾</button>
+  <button class="hbtn" id="lockBtn" title="Lock">🔒</button>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-tab="jobs" class="active">📋 Jobs</button>
+  <button data-tab="map">🗺️ Map</button>
+  <button data-tab="schedule">📅 Schedule</button>
+  <button data-tab="settings">⚙️ Settings</button>
+  <button data-tab="help">❓ Help</button>
+</nav>
+
+<main>
+  <!-- JOBS -->
+  <section class="panel active" id="tab-jobs">
+    <div class="stats" id="stats"></div>
+    <div class="toolbar">
+      <div class="search">🔍<input id="jobSearch" placeholder="Search customer, address, Job ID, order #, case #, model, serial…"></div>
+      <button class="btn pri" id="newBtn2">＋ New job</button>
+    </div>
+    <div class="chips" id="statusChips" style="margin-bottom:14px"></div>
+    <div class="cards" id="jobList"></div>
+  </section>
+
+  <!-- MAP -->
+  <section class="panel" id="tab-map">
+    <div class="toolbar">
+      <div class="search">🔍<input id="mapSearch" placeholder="Filter pins by customer, address, status…"></div>
+      <button class="btn" id="geocodeAll">📍 Place missing pins</button>
+    </div>
+    <div id="map"></div>
+    <div class="legend" id="mapLegend"></div>
+    <p class="hint">Tip: drag a pin to correct its position — it saves to the job. “Place missing pins” geocodes any job address without a location yet (free OpenStreetMap).</p>
+  </section>
+
+  <!-- SCHEDULE -->
+  <section class="panel" id="tab-schedule">
+    <div class="toolbar">
+      <div class="chips">
+        <button class="chip active" data-sched="upcoming">Upcoming</button>
+        <button class="chip" data-sched="all">All</button>
+        <button class="chip" data-sched="past">Past</button>
+      </div>
+    </div>
+    <div class="agenda" id="agenda"></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="panel" id="tab-settings">
+    <div class="sec" open><summary>Rates &amp; defaults</summary><div class="inner">
+      <div class="grid2">
+        <div class="field"><label>Technician / your name</label><input id="set_tech" placeholder="e.g. Eric Cheung"></div>
+        <div class="field"><label>Currency symbol</label><input id="set_cur" value="$" style="max-width:90px"></div>
+        <div class="field"><label>Labour rate (per hour)</label><input id="set_labour" type="number" min="0" step="1"></div>
+        <div class="field"><label>Mileage rate (per km, expense)</label><input id="set_mileage" type="number" min="0" step="0.01"></div>
+        <div class="field"><label>Tax rate on quotes (%)</label><input id="set_tax" type="number" min="0" step="0.5"></div>
+      </div>
+      <button class="btn pri" id="saveSettings" style="margin-top:12px">Save settings</button>
+    </div></div>
+
+    <div class="sec"><summary>Passcode</summary><div class="inner">
+      <p class="hint" id="pwState"></p>
+      <div class="grid2">
+        <div class="field"><label>New passcode (min 4 chars, blank to remove)</label><input id="set_pw1" type="password" autocomplete="new-password"></div>
+        <div class="field"><label>Confirm</label><input id="set_pw2" type="password" autocomplete="new-password"></div>
+      </div>
+      <button class="btn pri" id="savePw" style="margin-top:12px">Update passcode</button>
+      <p class="hint" style="margin-top:10px">The passcode locks this app on your device(s). It is not a substitute for a secured server — see the data note in Help before storing many real customer records in the cloud.</p>
+    </div></div>
+
+    <div class="sec"><summary>Data</summary><div class="inner">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="exportAll">⬇️ Export all jobs (CSV)</button>
+        <button class="btn" id="backupJson">💾 Download backup (.json)</button>
+        <button class="btn" id="restoreJson">↩️ Restore from backup</button>
+        <input type="file" id="restoreFile" accept="application/json" class="hide">
+      </div>
+      <p class="hint" style="margin-top:10px">Everything is stored in this browser (<code>localStorage</code>). Download a backup regularly until cloud sync is enabled.</p>
+    </div></div>
+  </section>
+
+  <!-- HELP -->
+  <section class="panel" id="tab-help">
+    <div class="sec" open><summary>How it works</summary><div class="inner" style="font-size:14px;color:var(--muted)">
+      <p><b>New request → Scheduled → Evaluated → Parts ordered → Parts arrived → Completed.</b> Set a job's status as it moves along; the map colours each pin by status so parts-arrived jobs (green) stand out as ready to go back out.</p>
+      <p><b>Paste text/email:</b> top-right button — paste a customer SMS or email and the app pulls out name, phone, address and the problem into a new draft you confirm.</p>
+      <p><b>Scheduling:</b> add one or more appointments to a job (evaluation, repair, follow-up). Each has an <b>Add to calendar</b> button (downloads an .ics that imports into Google/Outlook/Apple Calendar) and a Google Calendar quick-add link.</p>
+      <p><b>Quote vs expenses:</b> the <b>Customer estimate</b> section (labour + parts) is what you share with the customer. <b>Travel expenses</b> are kept separate and only appear in the company expense claim — never on the customer quote.</p>
+      <p><b>Copy for ServiceBench / Salesforce:</b> the 📋 button beside each field copies just that value.</p>
+    </div></div>
+    <div class="sec"><summary>⚠️ Data &amp; privacy note</summary><div class="inner" style="font-size:14px;color:var(--muted)">
+      <p>This build stores customer names, addresses and phone numbers <b>locally in your browser only</b>, behind the passcode. Cloud sync (phone ↔ desktop) is wired but <b>off</b> until a secured Firebase project (with sign-in rules) is set up — a passcode alone on a shared database would leave the data readable. Ask to turn on secured sync when you're ready.</p>
+    </div></div>
+    <div class="sec"><summary>🆕 Patch notes</summary><div class="inner" id="patchNotes"></div></div>
+    <p class="hint" style="text-align:center">Repair Desk · <span id="verLine"></span></p>
+  </section>
+</main>
+
+<!-- JOB EDITOR -->
+<div class="overlay" id="jobOverlay"><div class="modal" style="max-width:820px">
+  <div class="mhead"><h2 id="jobTitle">Job</h2><button class="x" data-close>✕</button></div>
+  <div class="mbody" id="jobBody"></div>
+  <div class="mfoot">
+    <button class="btn danger" id="deleteJob">Delete</button>
+    <span class="grow" style="flex:1"></span>
+    <button class="btn" data-close>Cancel</button>
+    <button class="btn pri" id="saveJob">Save job</button>
+  </div>
+</div></div>
+
+<!-- INTAKE -->
+<div class="overlay" id="intakeOverlay"><div class="modal">
+  <div class="mhead"><h2>New job from a text / email</h2><button class="x" data-close>✕</button></div>
+  <div class="mbody">
+    <p class="hint">Paste the customer's SMS or email below. Add labels like <code>Name:</code> <code>Address:</code> <code>Model:</code> <code>Order:</code> if you have them — otherwise the app guesses phone, email and address.</p>
+    <textarea id="intakeText" style="width:100%;min-height:150px;border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--bg);color:var(--ink)" placeholder="e.g.&#10;Name: Jane Doe&#10;Phone: 416-555-0199&#10;Address: 55 Front St W, Toronto ON&#10;Model: XR-65A80L  Serial: 1234567&#10;No picture, screen stays black"></textarea>
+    <div style="display:flex;gap:8px;margin-top:10px"><button class="btn pri" id="parseBtn">Parse →</button><span class="grow"></span></div>
+    <div id="parsePreview" class="hide"></div>
+  </div>
+</div></div>
+
+<!-- WHAT'S NEW -->
+<div class="overlay" id="whatsnewOverlay"><div class="modal" style="max-width:440px">
+  <div class="mhead"><h2>🆕 What's new</h2><button class="x" data-close>✕</button></div>
+  <div class="mbody" id="whatsnewBody"></div>
+  <div class="mfoot"><span class="grow"></span><button class="btn pri" data-close>Got it</button></div>
+</div></div>
+
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin=""></script>
+<script>
+/* ===================== Repair Desk — app logic ===================== */
+const APP_VERSION = 1;
+const LS = { data:'repairdesk_data', theme:'repairdesk_theme', admin:'repairdesk_admin', seen:'repairdesk_lastSeenVer' };
+let SYNC_ENABLED = false;   // flipped on by the Firebase module once a secured project is configured AND the user is signed in
+
+const PATCH_NOTES = [
+  { v:1, date:'2026-11-20', title:'First release', notes:[
+    'Job workspace with status pipeline: New → Scheduled → Evaluated → Parts ordered → Parts arrived → Completed.',
+    'Paste an SMS/email to auto-create a job.',
+    'Map of all jobs, colour-coded by status (parts-arrived = ready).',
+    'Scheduling with .ics / Google Calendar export.',
+    'Customer estimates (labour + parts) kept separate from company travel-expense claims.',
+    'Per-field copy buttons for ServiceBench / Salesforce; CSV + JSON export.'
+  ]}
+];
+
+const STATUSES = [
+  {k:'new',           label:'New request',  short:'New',        color:'var(--new)'},
+  {k:'scheduled',     label:'Scheduled',    short:'Scheduled',  color:'var(--scheduled)'},
+  {k:'evaluated',     label:'Evaluated',    short:'Evaluated',  color:'var(--evaluated)'},
+  {k:'parts_ordered', label:'Parts ordered',short:'Ordered',    color:'var(--ordered)'},
+  {k:'parts_arrived', label:'Parts arrived',short:'Arrived',    color:'var(--arrived)'},
+  {k:'completed',     label:'Completed',    short:'Completed',  color:'var(--completed)'},
+];
+const STATUS_HEX = { new:'#e5484d', scheduled:'#f5a623', evaluated:'#4c6ef5', parts_ordered:'#9b59b6', parts_arrived:'#1faa59', completed:'#8794a8' };
+const APPT_TYPES = [{k:'evaluation',label:'Evaluation visit'},{k:'repair',label:'Repair visit'},{k:'followup',label:'Follow-up'}];
+
+/* ---- helpers ---- */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const todayISO = () => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fmtDate(iso){ if(!iso) return ''; const [y,m,d]=iso.split('-').map(Number); if(!y) return iso; return `${MONTHS[m-1]} ${d}, ${y}`; }
+function fmt12(t){ if(!t) return ''; let [h,m]=t.split(':').map(Number); const ap=h<12?'AM':'PM'; h=h%12||12; return `${h}:${String(m||0).padStart(2,'0')} ${ap}`; }
+function money(n){ const c=(STATE.settings.currency||'$'); return c+(Number(n)||0).toFixed(2); }
+function statusMeta(k){ return STATUSES.find(s=>s.k===k)||STATUSES[0]; }
+function apptTypeLabel(k){ return (APPT_TYPES.find(t=>t.k===k)||APPT_TYPES[0]).label; }
+
+let toastT;
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2200); }
+async function copyText(str,label){
+  try{ await navigator.clipboard.writeText(str); }
+  catch(e){ const ta=document.createElement('textarea'); ta.value=str; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(_){} ta.remove(); }
+  toast((label||'Copied')+' copied');
+}
+
+/* ---- state ---- */
+const DEFAULT_SETTINGS = { tech:'', currency:'$', labourRate:120, mileageRate:0.70, taxRate:13, pwHash:'' };
+let STATE = { jobs:{}, settings:{...DEFAULT_SETTINGS} };
+let activeStatus='all', activeSched='upcoming', editingId=null, map=null, markers={}, mapInited=false;
+
+function newJob(seed={}){
+  return Object.assign({
+    id:uid(), jobId:'', serviceOrder:'', caseNo:'',
+    customer:'', address:'', phone:'', email:'',
+    model:'', serial:'', warranty:'', productNote:'',
+    issue:'', source:'sms', received:todayISO(),
+    status:'new', priority:'normal',
+    lat:null, lng:null, geoQuery:'',
+    appts:[], parts:[],
+    estLabourHours:'', estParts:[], estNotes:'',
+    travel:[],
+    diagnosis:'', repairNotes:'', closedDate:'',
+    log:[], createdAt:Date.now(), updatedAt:Date.now()
+  }, seed);
+}
+function jobsArr(){ return Object.values(STATE.jobs); }
+
+/* ---- persistence ---- */
+function persist(){
+  STATE.savedAt=Date.now();
+  try{ localStorage.setItem(LS.data, JSON.stringify(STATE)); }catch(e){ console.warn('save',e); }
+  if(SYNC_ENABLED && window.__fbWrite) window.__fbWrite(STATE);
+}
+function loadLocal(){
+  try{
+    const raw=localStorage.getItem(LS.data);
+    if(raw){ const d=JSON.parse(raw); STATE.jobs=d.jobs||{}; STATE.settings=Object.assign({...DEFAULT_SETTINGS}, d.settings||{}); }
+  }catch(e){ console.warn('load',e); }
+  normalize();
+}
+function normalize(){
+  Object.values(STATE.jobs).forEach(j=>{
+    j.appts=Array.isArray(j.appts)?j.appts:[];
+    j.parts=Array.isArray(j.parts)?j.parts:[];
+    j.estParts=Array.isArray(j.estParts)?j.estParts:[];
+    j.travel=Array.isArray(j.travel)?j.travel:[];
+    j.log=Array.isArray(j.log)?j.log:[];
+    if(!STATUSES.some(s=>s.k===j.status)) j.status='new';
+    if(typeof j.lat!=='number') j.lat=null;
+    if(typeof j.lng!=='number') j.lng=null;
+  });
+  STATE.settings=Object.assign({...DEFAULT_SETTINGS}, STATE.settings||{});
+}
+function logEvent(j,text){ j.log.unshift({ts:Date.now(),text}); if(j.log.length>200) j.log.length=200; }
+
+/* ===================== RENDER: jobs ===================== */
+function renderStats(){
+  const arr=jobsArr();
+  const by=k=>arr.filter(j=>j.status===k).length;
+  const open=arr.filter(j=>j.status!=='completed').length;
+  const cards=[
+    {n:arr.length,l:'Total'},
+    {n:open,l:'Open'},
+    {n:by('new'),l:'New'},
+    {n:by('parts_ordered'),l:'Parts ordered'},
+    {n:by('parts_arrived'),l:'Ready (arrived)'},
+  ];
+  $('#stats').innerHTML=cards.map(c=>`<div class="stat"><div class="n">${c.n}</div><div class="l">${esc(c.l)}</div></div>`).join('');
+}
+function renderStatusChips(){
+  const arr=jobsArr();
+  const mk=(k,label)=>{ const n=k==='all'?arr.length:arr.filter(j=>j.status===k).length;
+    return `<button class="chip ${activeStatus===k?'active':''}" data-status="${k}">${esc(label)} <span style="opacity:.6">${n}</span></button>`; };
+  $('#statusChips').innerHTML = mk('all','All') + STATUSES.map(s=>mk(s.k,s.short)).join('');
+}
+function matchJob(j,q){
+  if(!q) return true;
+  return [j.customer,j.address,j.jobId,j.serviceOrder,j.caseNo,j.model,j.serial,j.phone,j.issue]
+    .some(v=>String(v||'').toLowerCase().includes(q));
+}
+function renderJobs(){
+  renderStats(); renderStatusChips();
+  const q=$('#jobSearch').value.trim().toLowerCase();
+  let arr=jobsArr().filter(j=>matchJob(j,q));
+  if(activeStatus!=='all') arr=arr.filter(j=>j.status===activeStatus);
+  const order={new:0,scheduled:1,parts_arrived:2,parts_ordered:3,evaluated:4,completed:9};
+  arr.sort((a,b)=>(order[a.status]-order[b.status])||(b.updatedAt-a.updatedAt));
+  const el=$('#jobList');
+  if(!arr.length){ el.innerHTML=`<div class="empty" style="grid-column:1/-1"><div class="big">🗂️</div><p>No jobs yet. Tap <b>＋ New job</b> or <b>Paste text/email</b> to start.</p></div>`; return; }
+  el.innerHTML=arr.map(j=>{
+    const sm=statusMeta(j.status);
+    const nextAppt=upcomingApptOf(j);
+    const ids=[j.jobId&&('Job '+j.jobId), j.serviceOrder&&('SO '+j.serviceOrder), j.caseNo&&('Case '+j.caseNo)].filter(Boolean).join(' · ');
+    return `<div class="jcard s-${j.status}" data-open="${j.id}">
+      <div class="row" style="margin-top:0"><h3>${esc(j.customer||'(no name)')}</h3><span class="sbadge s-${j.status}">${esc(sm.short)}</span></div>
+      <div class="sub">${esc(j.model||'Sony TV')}${j.serial?(' · '+esc(j.serial)):''}</div>
+      <div class="sub">${esc(j.issue||'').slice(0,90)}${(j.issue||'').length>90?'…':''}</div>
+      ${ids?`<div class="ids">${esc(ids)}</div>`:''}
+      <div class="mini">
+        ${j.address?`<span>📍 ${esc(j.address).slice(0,40)}</span>`:''}
+        ${nextAppt?`<span>🗓️ <b>${esc(fmtDate(nextAppt.date))} ${esc(fmt12(nextAppt.time))}</b></span>`:''}
+        ${j.parts.length?`<span>🔩 ${j.parts.filter(p=>p.status==='arrived').length}/${j.parts.length} parts in</span>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+function upcomingApptOf(j){
+  const now=todayISO();
+  return (j.appts||[]).filter(a=>a.date&&a.date>=now).sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time))[0]||null;
+}
+
+/* ===================== JOB EDITOR ===================== */
+function openJob(id){
+  const j = id ? STATE.jobs[id] : newJob();
+  editingId=j.id;
+  if(!id){ /* don't add until saved */ }
+  $('#jobTitle').textContent = id ? (j.customer||'Edit job') : 'New job';
+  $('#deleteJob').style.display = id ? '' : 'none';
+  $('#jobBody').innerHTML = jobForm(j);
+  wireJobForm(j);
+  openOverlay('#jobOverlay');
+}
+function fld(label,id,val,opts={}){
+  const copy = opts.copy ? `<button type="button" class="copybtn" data-copy="${esc(val||'')}" data-label="${esc(label)}" title="Copy ${esc(label)}">📋</button>` : '';
+  const input = opts.type==='textarea'
+    ? `<textarea id="${id}">${esc(val||'')}</textarea>`
+    : `<input id="${id}" type="${opts.type||'text'}" value="${esc(val??'')}" ${opts.attr||''} placeholder="${esc(opts.ph||'')}">`;
+  return `<div class="field ${opts.full?'full':''}"><label>${esc(label)}</label><div class="inwrap">${input}${copy}</div></div>`;
+}
+function jobForm(j){
+  const statusOpts=STATUSES.map(s=>`<option value="${s.k}" ${j.status===s.k?'selected':''}>${esc(s.label)}</option>`).join('');
+  const srcOpts=['sms','email','phone','in person','other'].map(s=>`<option ${j.source===s?'selected':''}>${s}</option>`).join('');
+  const priOpts=['low','normal','high','urgent'].map(p=>`<option ${j.priority===p?'selected':''}>${p}</option>`).join('');
+  return `
+  <div class="grid2">
+    <div class="field"><label>Status</label><select id="f_status">${statusOpts}</select></div>
+    <div class="field"><label>Priority</label><select id="f_priority">${priOpts}</select></div>
+  </div>
+
+  <details class="sec" open><summary>Reference IDs</summary><div class="inner"><div class="grid2">
+    ${fld('Service Job ID','f_jobId',j.jobId,{copy:true,ph:'as provided'})}
+    ${fld('Service Order # (ServiceBench)','f_serviceOrder',j.serviceOrder,{copy:true})}
+    ${fld('Case # (Salesforce)','f_caseNo',j.caseNo,{copy:true})}
+    <div class="field"><label>Intake source · received</label><div class="inwrap"><select id="f_source" style="max-width:120px">${srcOpts}</select><input id="f_received" type="date" value="${esc(j.received||todayISO())}"></div></div>
+  </div></div></details>
+
+  <details class="sec" open><summary>Customer &amp; location</summary><div class="inner"><div class="grid2">
+    ${fld('Customer name','f_customer',j.customer,{copy:true})}
+    ${fld('Phone','f_phone',j.phone,{copy:true,type:'tel',ph:'(416) 555-0123'})}
+    ${fld('Service address','f_address',j.address,{copy:true,full:true,ph:'street, city, province'})}
+    ${fld('Email','f_email',j.email,{copy:true,type:'email'})}
+    <div class="field"><label>Map location</label><div class="inwrap">
+      <input id="f_latlng" value="${j.lat!=null&&j.lng!=null?(j.lat.toFixed(5)+', '+j.lng.toFixed(5)):''}" placeholder="not placed" readonly style="color:var(--muted)">
+      <button type="button" class="btn sm" id="f_geocode">📍 Locate</button>
+    </div></div>
+  </div></div></details>
+
+  <details class="sec" open><summary>Sony TV &amp; problem</summary><div class="inner"><div class="grid2">
+    ${fld('Model #','f_model',j.model,{copy:true,ph:'e.g. XR-65A80L'})}
+    ${fld('Serial #','f_serial',j.serial,{copy:true})}
+    ${fld('Warranty / purchase','f_warranty',j.warranty,{ph:'e.g. in warranty to 2027-03'})}
+    ${fld('Product note','f_productNote',j.productNote,{ph:'optional'})}
+    ${fld('Reported issue / symptom','f_issue',j.issue,{type:'textarea',full:true})}
+  </div></div></details>
+
+  <details class="sec"><summary>🗓️ Scheduling &amp; appointments</summary><div class="inner">
+    <div class="callout">Confirm the date/time with the customer, then add it here. Each appointment gets an <b>Add to calendar</b> button. Setting an appointment moves the job to <b>Scheduled</b> if it's still New.</div>
+    <div id="apptList"></div>
+    <button type="button" class="btn sm" id="addAppt">＋ Add appointment</button>
+  </div></details>
+
+  <details class="sec"><summary>🔩 Parts (repair tracking)</summary><div class="inner">
+    <div class="hint" style="margin-bottom:8px">The actual parts you order for the repair. Mark each <b>Arrived</b> when it comes in — once all are in, set the job to <b>Parts arrived</b>.</div>
+    <div id="partList"></div>
+    <button type="button" class="btn sm" id="addPart">＋ Add part</button>
+  </div></details>
+
+  <details class="sec"><summary>💲 Customer estimate (quote)</summary><div class="inner">
+    <div class="callout">Goes to the <b>customer</b>. Travel expenses are <u>not</u> included here.</div>
+    <div class="field" style="max-width:220px"><label>Estimated labour (hours)</label><input id="f_estHours" type="number" min="0" step="0.25" value="${esc(j.estLabourHours)}"></div>
+    <p class="hint" style="margin:8px 0 4px">Estimated parts for the quote:</p>
+    <div id="estPartList"></div>
+    <button type="button" class="btn sm" id="addEstPart">＋ Add estimate part</button>
+    ${fld('Notes to customer','f_estNotes',j.estNotes,{type:'textarea',full:true})}
+    <div id="estTotals" style="margin-top:10px"></div>
+    <button type="button" class="btn" id="copyQuote" style="margin-top:8px">📋 Copy quote for customer</button>
+  </div></details>
+
+  <details class="sec"><summary>🚗 Travel expenses (company only)</summary><div class="inner">
+    <div class="callout" style="background:color-mix(in srgb,var(--warn) 18%,transparent)">Company expense claim only — <b>never</b> shown to the customer or added to the quote.</div>
+    <div id="travelList"></div>
+    <button type="button" class="btn sm" id="addTravel">＋ Add travel expense</button>
+    <div id="travelTotal" style="margin-top:10px"></div>
+    <button type="button" class="btn" id="copyExpense" style="margin-top:8px">📋 Copy expense claim</button>
+  </div></details>
+
+  <details class="sec"><summary>🛠️ Work performed</summary><div class="inner"><div class="grid2">
+    ${fld('Diagnosis','f_diagnosis',j.diagnosis,{type:'textarea',full:true})}
+    ${fld('Repair notes','f_repairNotes',j.repairNotes,{type:'textarea',full:true})}
+    <div class="field"><label>Closed date</label><input id="f_closedDate" type="date" value="${esc(j.closedDate||'')}"></div>
+  </div></div></details>
+  `;
+}
+
+/* editor draft arrays (edited live, committed on save) */
+let draft = null;
+function wireJobForm(j){
+  draft = {
+    appts: JSON.parse(JSON.stringify(j.appts||[])),
+    parts: JSON.parse(JSON.stringify(j.parts||[])),
+    estParts: JSON.parse(JSON.stringify(j.estParts||[])),
+    travel: JSON.parse(JSON.stringify(j.travel||[])),
+    lat:j.lat, lng:j.lng
+  };
+  renderAppts(); renderParts(); renderEstParts(); renderTravel(); renderEstTotals(); renderTravelTotal();
+
+  $('#addAppt').onclick=()=>{ draft.appts.push({id:uid(),type:'evaluation',date:todayISO(),time:'09:00',duration:60,confirmed:false,notes:''}); renderAppts(); };
+  $('#addPart').onclick=()=>{ draft.parts.push({id:uid(),pn:'',desc:'',qty:1,status:'ordered',track:''}); renderParts(); };
+  $('#addEstPart').onclick=()=>{ draft.estParts.push({id:uid(),desc:'',qty:1,price:0}); renderEstParts(); renderEstTotals(); };
+  $('#addTravel').onclick=()=>{ draft.travel.push({id:uid(),date:todayISO(),desc:'',km:'',rate:STATE.settings.mileageRate,amount:''}); renderTravel(); renderTravelTotal(); };
+  $('#f_estHours').oninput=renderEstTotals;
+  $('#copyQuote').onclick=()=>copyText(buildQuoteText(readForm(j)),'Quote');
+  $('#copyExpense').onclick=()=>copyText(buildExpenseText(readForm(j)),'Expense claim');
+  $('#f_geocode').onclick=()=>geocodeEditor(j);
+  // copy buttons
+  $$('#jobBody .copybtn').forEach(b=>b.onclick=()=>{ const v=b.closest('.inwrap').querySelector('input,textarea'); copyText((v?v.value:b.dataset.copy)||'', b.dataset.label); });
+}
+function renderAppts(){
+  const el=$('#apptList');
+  el.innerHTML = draft.appts.map((a,i)=>{
+    const typeOpts=APPT_TYPES.map(t=>`<option value="${t.k}" ${a.type===t.k?'selected':''}>${esc(t.label)}</option>`).join('');
+    return `<div class="litem" style="grid-template-columns:1fr 1fr">
+      <div class="field"><label>Type</label><select data-ap="type" data-i="${i}">${typeOpts}</select></div>
+      <div class="field"><label>Confirmed?</label><select data-ap="confirmed" data-i="${i}"><option value="">Proposed</option><option value="1" ${a.confirmed?'selected':''}>Confirmed</option></select></div>
+      <div class="field"><label>Date</label><input type="date" data-ap="date" data-i="${i}" value="${esc(a.date||'')}"></div>
+      <div class="field"><label>Time</label><input type="time" data-ap="time" data-i="${i}" value="${esc(a.time||'')}"></div>
+      <div class="field"><label>Duration (min)</label><input type="number" min="15" step="15" data-ap="duration" data-i="${i}" value="${esc(a.duration||60)}"></div>
+      <div class="field"><label>Notes</label><input data-ap="notes" data-i="${i}" value="${esc(a.notes||'')}"></div>
+      <div class="field full" style="flex-direction:row;gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn sm" data-ics="${i}">📅 Add to calendar (.ics)</button>
+        <button type="button" class="btn sm ghost" data-gcal="${i}">Google Calendar</button>
+        <span class="grow"></span>
+        <button type="button" class="btn sm danger" data-delap="${i}">Remove</button>
+      </div>
+    </div>`;
+  }).join('') || `<p class="hint">No appointments yet.</p>`;
+  el.querySelectorAll('[data-ap]').forEach(inp=>inp.oninput=()=>{ const i=+inp.dataset.i,k=inp.dataset.ap;
+    draft.appts[i][k] = k==='confirmed' ? !!inp.value : (k==='duration'?(+inp.value||60):inp.value); });
+  el.querySelectorAll('[data-delap]').forEach(b=>b.onclick=()=>{ draft.appts.splice(+b.dataset.delap,1); renderAppts(); });
+  el.querySelectorAll('[data-ics]').forEach(b=>b.onclick=()=>downloadICS(draft.appts[+b.dataset.ics], readForm(STATE.jobs[editingId]||newJob())));
+  el.querySelectorAll('[data-gcal]').forEach(b=>b.onclick=()=>{ const u=gcalLink(draft.appts[+b.dataset.gcal], readForm(STATE.jobs[editingId]||newJob())); window.open(u,'_blank','noopener'); });
+}
+function renderParts(){
+  const el=$('#partList');
+  el.innerHTML = draft.parts.map((p,i)=>`<div class="litem" style="grid-template-columns:1fr 2fr .6fr 1fr">
+    <div class="field"><label>Part #</label><input data-pt="pn" data-i="${i}" value="${esc(p.pn)}"></div>
+    <div class="field"><label>Description</label><input data-pt="desc" data-i="${i}" value="${esc(p.desc)}"></div>
+    <div class="field"><label>Qty</label><input type="number" min="1" data-pt="qty" data-i="${i}" value="${esc(p.qty||1)}"></div>
+    <div class="field"><label>Status</label><select data-pt="status" data-i="${i}"><option value="ordered" ${p.status==='ordered'?'selected':''}>Ordered</option><option value="arrived" ${p.status==='arrived'?'selected':''}>Arrived</option></select></div>
+    <div class="field full"><label>Tracking # / ETA</label><div class="inwrap"><input data-pt="track" data-i="${i}" value="${esc(p.track||'')}"><button type="button" class="btn sm danger" data-delpt="${i}">✕</button></div></div>
+  </div>`).join('') || `<p class="hint">No parts added.</p>`;
+  el.querySelectorAll('[data-pt]').forEach(inp=>inp.oninput=()=>{ const i=+inp.dataset.i,k=inp.dataset.pt; draft.parts[i][k]= k==='qty'?(+inp.value||1):inp.value; });
+  el.querySelectorAll('[data-delpt]').forEach(b=>b.onclick=()=>{ draft.parts.splice(+b.dataset.delpt,1); renderParts(); });
+}
+function renderEstParts(){
+  const el=$('#estPartList');
+  el.innerHTML = draft.estParts.map((p,i)=>`<div class="litem" style="grid-template-columns:2fr .6fr 1fr auto">
+    <div class="field"><label>Part / description</label><input data-ep="desc" data-i="${i}" value="${esc(p.desc)}"></div>
+    <div class="field"><label>Qty</label><input type="number" min="1" data-ep="qty" data-i="${i}" value="${esc(p.qty||1)}"></div>
+    <div class="field"><label>Unit price</label><input type="number" min="0" step="0.01" data-ep="price" data-i="${i}" value="${esc(p.price||0)}"></div>
+    <div class="field"><label>&nbsp;</label><button type="button" class="btn sm danger" data-delep="${i}">✕</button></div>
+  </div>`).join('') || `<p class="hint">No estimate parts.</p>`;
+  el.querySelectorAll('[data-ep]').forEach(inp=>inp.oninput=()=>{ const i=+inp.dataset.i,k=inp.dataset.ep; draft.estParts[i][k]= k==='desc'?inp.value:(+inp.value||0); renderEstTotals(); });
+  el.querySelectorAll('[data-delep]').forEach(b=>b.onclick=()=>{ draft.estParts.splice(+b.dataset.delep,1); renderEstParts(); renderEstTotals(); });
+}
+function renderTravel(){
+  const el=$('#travelList');
+  el.innerHTML = draft.travel.map((t,i)=>`<div class="litem" style="grid-template-columns:1fr 2fr">
+    <div class="field"><label>Date</label><input type="date" data-tv="date" data-i="${i}" value="${esc(t.date||'')}"></div>
+    <div class="field"><label>Purpose / description</label><input data-tv="desc" data-i="${i}" value="${esc(t.desc||'')}"></div>
+    <div class="field"><label>Distance (km)</label><input type="number" min="0" step="0.1" data-tv="km" data-i="${i}" value="${esc(t.km)}"></div>
+    <div class="field"><label>Rate (/km)</label><input type="number" min="0" step="0.01" data-tv="rate" data-i="${i}" value="${esc(t.rate??STATE.settings.mileageRate)}"></div>
+    <div class="field"><label>Or flat amount</label><input type="number" min="0" step="0.01" data-tv="amount" data-i="${i}" value="${esc(t.amount)}" placeholder="overrides km×rate"></div>
+    <div class="field" style="justify-content:flex-end"><label>&nbsp;</label><button type="button" class="btn sm danger" data-deltv="${i}">Remove</button></div>
+  </div>`).join('') || `<p class="hint">No travel expenses.</p>`;
+  el.querySelectorAll('[data-tv]').forEach(inp=>inp.oninput=()=>{ const i=+inp.dataset.i,k=inp.dataset.tv; draft.travel[i][k]= (k==='desc'||k==='date')?inp.value:(inp.value===''?'':(+inp.value||0)); renderTravelTotal(); });
+  el.querySelectorAll('[data-deltv]').forEach(b=>b.onclick=()=>{ draft.travel.splice(+b.dataset.deltv,1); renderTravel(); renderTravelTotal(); });
+}
+function estTotals(){
+  const hours=+($('#f_estHours')?.value)||0;
+  const labour=hours*(+STATE.settings.labourRate||0);
+  const parts=draft.estParts.reduce((s,p)=>s+(+p.qty||0)*(+p.price||0),0);
+  const sub=labour+parts; const tax=sub*(+STATE.settings.taxRate||0)/100;
+  return {hours,labour,parts,sub,tax,total:sub+tax};
+}
+function renderEstTotals(){
+  const t=estTotals();
+  $('#estTotals').innerHTML=`
+    <div class="totrow"><span>Labour (${t.hours} hr @ ${money(STATE.settings.labourRate)})</span><span>${money(t.labour)}</span></div>
+    <div class="totrow"><span>Parts</span><span>${money(t.parts)}</span></div>
+    <div class="totrow"><span>Subtotal</span><span>${money(t.sub)}</span></div>
+    <div class="totrow"><span>Tax (${STATE.settings.taxRate}%)</span><span>${money(t.tax)}</span></div>
+    <div class="totrow big"><span>Estimate total</span><span>${money(t.total)}</span></div>`;
+}
+function travelTotal(){ return draft.travel.reduce((s,t)=> s + (t.amount!==''&&t.amount!=null ? (+t.amount||0) : (+t.km||0)*(+t.rate||0)), 0); }
+function renderTravelTotal(){ $('#travelTotal').innerHTML=`<div class="totrow big"><span>Expense claim total</span><span>${money(travelTotal())}</span></div>`; }
+
+/* read the form into a job object (does not persist) */
+function readForm(base){
+  const j=Object.assign({}, base);
+  const g=id=>{ const e=$('#'+id); return e?e.value:''; };
+  j.status=g('f_status'); j.priority=g('f_priority');
+  j.jobId=g('f_jobId').trim(); j.serviceOrder=g('f_serviceOrder').trim(); j.caseNo=g('f_caseNo').trim();
+  j.source=g('f_source'); j.received=g('f_received');
+  j.customer=g('f_customer').trim(); j.phone=g('f_phone').trim(); j.address=g('f_address').trim(); j.email=g('f_email').trim();
+  j.model=g('f_model').trim(); j.serial=g('f_serial').trim(); j.warranty=g('f_warranty').trim(); j.productNote=g('f_productNote').trim();
+  j.issue=g('f_issue').trim();
+  j.estLabourHours=g('f_estHours'); j.estNotes=g('f_estNotes').trim();
+  j.diagnosis=g('f_diagnosis').trim(); j.repairNotes=g('f_repairNotes').trim(); j.closedDate=g('f_closedDate');
+  j.appts=draft.appts; j.parts=draft.parts; j.estParts=draft.estParts; j.travel=draft.travel;
+  j.lat=draft.lat; j.lng=draft.lng;
+  return j;
+}
+function saveJobFromForm(){
+  const existing=STATE.jobs[editingId];
+  const base=existing||newJob({id:editingId});
+  const j=readForm(base);
+  // auto-advance New -> Scheduled when a confirmed appointment exists
+  if(j.status==='new' && j.appts.some(a=>a.confirmed)) j.status='scheduled';
+  j.updatedAt=Date.now();
+  const isNew=!existing;
+  if(isNew){ j.createdAt=Date.now(); logEvent(j,'Job created'); }
+  else logEvent(j,'Job updated');
+  STATE.jobs[j.id]=j;
+  persist(); closeOverlay('#jobOverlay'); renderJobs(); refreshMapMarkers(); renderAgenda();
+  toast(isNew?'Job created':'Job saved');
+}
+
+/* ===================== quote / expense text ===================== */
+function buildQuoteText(j){
+  const t=estTotals();
+  const L=[];
+  L.push('QUOTATION — Sony TV Repair');
+  if(STATE.settings.tech) L.push('Technician: '+STATE.settings.tech);
+  L.push('Date: '+fmtDate(todayISO()));
+  L.push('');
+  if(j.customer) L.push('Customer: '+j.customer);
+  if(j.model||j.serial) L.push('Unit: '+[j.model,j.serial].filter(Boolean).join(' · '));
+  if(j.jobId) L.push('Job ID: '+j.jobId);
+  L.push('');
+  if(j.issue){ L.push('Reported issue:'); L.push('  '+j.issue); L.push(''); }
+  L.push('Labour: '+t.hours+' hr @ '+money(STATE.settings.labourRate)+' = '+money(t.labour));
+  if(j.estParts.length){ L.push('Parts:'); j.estParts.forEach(p=>L.push('  - '+(p.desc||'part')+'  x'+(p.qty||1)+' @ '+money(p.price)+' = '+money((+p.qty||0)*(+p.price||0)))); }
+  L.push('');
+  L.push('Subtotal: '+money(t.sub));
+  L.push('Tax ('+STATE.settings.taxRate+'%): '+money(t.tax));
+  L.push('TOTAL: '+money(t.total));
+  if(j.estNotes){ L.push(''); L.push('Notes: '+j.estNotes); }
+  return L.join('\n');
+}
+function buildExpenseText(j){
+  const L=[];
+  L.push('TRAVEL EXPENSE CLAIM (company)');
+  if(STATE.settings.tech) L.push('Submitted by: '+STATE.settings.tech);
+  if(j.customer) L.push('Job: '+[j.jobId,j.customer].filter(Boolean).join(' · '));
+  L.push('');
+  if(!j.travel.length){ L.push('(no travel expenses)'); return L.join('\n'); }
+  j.travel.forEach(t=>{
+    const amt = (t.amount!==''&&t.amount!=null) ? (+t.amount||0) : (+t.km||0)*(+t.rate||0);
+    const detail = (t.amount!==''&&t.amount!=null) ? 'flat' : ((t.km||0)+' km @ '+money(t.rate));
+    L.push(fmtDate(t.date)+' | '+(t.desc||'travel')+' | '+detail+' | '+money(amt));
+  });
+  L.push('');
+  L.push('TOTAL CLAIM: '+money(travelTotal.call?travelTotalFor(j):0));
+  return L.join('\n');
+}
+function travelTotalFor(j){ return (j.travel||[]).reduce((s,t)=> s + (t.amount!==''&&t.amount!=null?(+t.amount||0):(+t.km||0)*(+t.rate||0)),0); }
+
+/* ===================== calendar (.ics / gcal) ===================== */
+function apptDates(a){
+  const [y,m,d]=(a.date||todayISO()).split('-').map(Number);
+  const [hh,mm]=(a.time||'09:00').split(':').map(Number);
+  const start=new Date(y,(m||1)-1,d||1,hh||0,mm||0);
+  const end=new Date(start.getTime()+((+a.duration||60)*60000));
+  const f=dt=>`${dt.getFullYear()}${String(dt.getMonth()+1).padStart(2,'0')}${String(dt.getDate()).padStart(2,'0')}T${String(dt.getHours()).padStart(2,'0')}${String(dt.getMinutes()).padStart(2,'0')}00`;
+  return {s:f(start), e:f(end)};
+}
+function apptSummary(a,j){ return `Sony TV ${apptTypeLabel(a.type)} — ${j.customer||'Customer'}`; }
+function apptDesc(a,j){ return [j.jobId?('Job '+j.jobId):'', j.phone?('Phone: '+j.phone):'', j.issue||'', a.notes||''].filter(Boolean).join('\n'); }
+function icsEsc(s){ return String(s||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\n/g,'\\n'); }
+function downloadICS(a,j){
+  const {s,e}=apptDates(a);
+  const now=new Date();
+  const stamp=`${now.getUTCFullYear()}${String(now.getUTCMonth()+1).padStart(2,'0')}${String(now.getUTCDate()).padStart(2,'0')}T${String(now.getUTCHours()).padStart(2,'0')}${String(now.getUTCMinutes()).padStart(2,'0')}${String(now.getUTCSeconds()).padStart(2,'0')}Z`;
+  const ics=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//RepairDesk//EN','CALSCALE:GREGORIAN','BEGIN:VEVENT',
+    'UID:'+(a.id||uid())+'@repairdesk','DTSTAMP:'+stamp,'DTSTART:'+s,'DTEND:'+e,
+    'SUMMARY:'+icsEsc(apptSummary(a,j)),'LOCATION:'+icsEsc(j.address||''),'DESCRIPTION:'+icsEsc(apptDesc(a,j)),
+    'END:VEVENT','END:VCALENDAR'].join('\r\n');
+  const blob=new Blob([ics],{type:'text/calendar'});
+  const url=URL.createObjectURL(blob); const link=document.createElement('a');
+  link.href=url; link.download=`service-${(j.customer||'job').replace(/\W+/g,'_')}-${a.date||''}.ics`;
+  document.body.appendChild(link); link.click(); link.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+  toast('Calendar file downloaded');
+}
+function gcalLink(a,j){
+  const {s,e}=apptDates(a);
+  const tz=(Intl.DateTimeFormat().resolvedOptions().timeZone)||'';
+  const p=new URLSearchParams({action:'TEMPLATE',text:apptSummary(a,j),dates:`${s}/${e}`,details:apptDesc(a,j),location:j.address||'',ctz:tz});
+  return 'https://calendar.google.com/calendar/render?'+p.toString();
+}
+
+/* ===================== geocoding ===================== */
+async function geocode(q){
+  const url='https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(q);
+  const r=await fetch(url,{headers:{'Accept':'application/json'}});
+  if(!r.ok) throw new Error('geocode http '+r.status);
+  const a=await r.json();
+  if(!a.length) return null;
+  return {lat:parseFloat(a[0].lat), lng:parseFloat(a[0].lon)};
+}
+async function geocodeEditor(j){
+  const addr=$('#f_address').value.trim();
+  if(!addr){ toast('Enter an address first'); return; }
+  const btn=$('#f_geocode'); btn.textContent='…'; btn.disabled=true;
+  try{
+    const g=await geocode(addr);
+    if(g){ draft.lat=g.lat; draft.lng=g.lng; $('#f_latlng').value=g.lat.toFixed(5)+', '+g.lng.toFixed(5); toast('Location found'); }
+    else toast('Address not found — try adding city/province');
+  }catch(e){ console.warn(e); toast('Geocoding failed (offline?)'); }
+  btn.textContent='📍 Locate'; btn.disabled=false;
+}
+async function geocodeMissing(){
+  const todo=jobsArr().filter(j=>j.address && (j.lat==null||j.lng==null));
+  if(!todo.length){ toast('All addresses already placed'); return; }
+  toast('Placing '+todo.length+' pin(s)…');
+  for(const j of todo){
+    try{ const g=await geocode(j.address); if(g){ j.lat=g.lat; j.lng=g.lng; persist(); } }catch(e){ console.warn('geo',e); }
+    await new Promise(r=>setTimeout(r,1100)); // respect Nominatim ~1 req/sec
+  }
+  refreshMapMarkers(); renderJobs(); toast('Done placing pins');
+}
+
+/* ===================== MAP ===================== */
+function initMap(){
+  if(mapInited) return;
+  map=L.map('map',{scrollWheelZoom:true}).setView([43.6532,-79.3832],9); // Toronto default
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+  mapInited=true;
+  $('#mapLegend').innerHTML=STATUSES.map(s=>`<span><i style="background:${STATUS_HEX[s.k]}"></i>${esc(s.label)}</span>`).join('');
+  refreshMapMarkers();
+}
+function pinIcon(status){
+  return L.divIcon({className:'',html:`<div class="pin" style="background:${STATUS_HEX[status]||'#888'}"></div>`,iconSize:[20,20],iconAnchor:[10,18],popupAnchor:[0,-16]});
+}
+function refreshMapMarkers(){
+  if(!mapInited||!map) return;
+  Object.values(markers).forEach(m=>map.removeLayer(m)); markers={};
+  const q=$('#mapSearch').value.trim().toLowerCase();
+  const pts=[];
+  jobsArr().forEach(j=>{
+    if(j.lat==null||j.lng==null) return;
+    if(q && !matchJob(j,q) && !statusMeta(j.status).label.toLowerCase().includes(q)) return;
+    const m=L.marker([j.lat,j.lng],{icon:pinIcon(j.status),draggable:true}).addTo(map);
+    m.bindPopup(`<b>${esc(j.customer||'(no name)')}</b><br>${esc(statusMeta(j.status).label)}<br>${esc(j.address||'')}<br><a href="#" onclick="openJob('${j.id}');return false;">Open job →</a>`);
+    m.on('dragend',ev=>{ const p=ev.target.getLatLng(); j.lat=p.lat; j.lng=p.lng; persist(); toast('Pin moved'); });
+    markers[j.id]=m; pts.push([j.lat,j.lng]);
+  });
+  if(pts.length){ try{ map.fitBounds(pts,{padding:[40,40],maxZoom:13}); }catch(e){} }
+}
+
+/* ===================== SCHEDULE ===================== */
+function allAppts(){
+  const out=[];
+  jobsArr().forEach(j=>(j.appts||[]).forEach(a=>out.push({a,j})));
+  out.sort((x,y)=>(x.a.date+(x.a.time||'')).localeCompare(y.a.date+(y.a.time||'')));
+  return out;
+}
+function renderAgenda(){
+  const now=todayISO();
+  let list=allAppts();
+  if(activeSched==='upcoming') list=list.filter(x=>x.a.date>=now);
+  else if(activeSched==='past') list=list.filter(x=>x.a.date<now).reverse();
+  const el=$('#agenda');
+  if(!list.length){ el.innerHTML=`<div class="empty"><div class="big">📅</div><p>No ${activeSched} appointments.</p></div>`; return; }
+  el.innerHTML=list.map(({a,j})=>{
+    const [y,m,d]=(a.date||'').split('-').map(Number);
+    const past=a.date<now;
+    return `<div class="ag ${past?'past':''}">
+      <div class="when"><div class="d">${d||'?'}</div><div class="mo">${m?MONTHS[m-1]:''}</div><div class="t">${esc(fmt12(a.time))}</div></div>
+      <div class="meat">
+        <div style="font-weight:800">${esc(j.customer||'(no name)')} <span class="tag">${esc(apptTypeLabel(a.type))}</span> ${a.confirmed?'<span class="tag" style="background:color-mix(in srgb,var(--good) 20%,transparent);color:var(--good)">confirmed</span>':'<span class="tag">proposed</span>'}</div>
+        <div class="hint">${esc(j.address||'')}${a.notes?(' · '+esc(a.notes)):''}</div>
+        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn sm" data-openjob="${j.id}">Open job</button>
+          <button class="btn sm ghost" data-agics="${j.id}:${a.id}">📅 .ics</button>
+          <button class="btn sm ghost" data-aggcal="${j.id}:${a.id}">Google</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('[data-openjob]').forEach(b=>b.onclick=()=>openJob(b.dataset.openjob));
+  el.querySelectorAll('[data-agics]').forEach(b=>b.onclick=()=>{ const [ji,ai]=b.dataset.agics.split(':'); const j=STATE.jobs[ji]; const a=(j.appts||[]).find(x=>x.id===ai); if(a)downloadICS(a,j); });
+  el.querySelectorAll('[data-aggcal]').forEach(b=>b.onclick=()=>{ const [ji,ai]=b.dataset.aggcal.split(':'); const j=STATE.jobs[ji]; const a=(j.appts||[]).find(x=>x.id===ai); if(a)window.open(gcalLink(a,j),'_blank','noopener'); });
+}
+
+/* ===================== INTAKE PARSE ===================== */
+function parseIntake(text){
+  // split inline labels ("Model: X  Serial: Y" on one line) onto their own lines so each grabs cleanly
+  text = text.replace(/\s+(Serial(?:\s*#|\s*no\.?|\s*number)?|SN|Model(?:\s*#|\s*no\.?|\s*number)?|Phone|Tel|Mobile|Email|Address|Case(?:\s*#|\s*no\.?|\s*number)?|Service Order(?:\s*#)?|Order(?:\s*#|\s*no\.?)?|Service Job ID|Job(?:\s*#|\s*ID)?|Warranty)\s*:/gi, '\n$1:');
+  const grab=labels=>{ for(const l of labels){ const m=text.match(new RegExp('(?:^|\\n)\\s*'+l+'\\s*[:\\-]\\s*(.+)','i')); if(m) return m[1].trim(); } return ''; };
+  const o={};
+  o.customer=grab(['name','customer','client','cust']);
+  o.email=(text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)||[''])[0];
+  let ph=(text.match(/(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/)||[''])[0];
+  if(ph){ const dd=ph.replace(/\D/g,'').slice(-10); if(dd.length===10) ph=`(${dd.slice(0,3)}) ${dd.slice(3,6)}-${dd.slice(6)}`; }
+  o.phone=ph;
+  o.address=grab(['address','addr','location','service address']);
+  o.model=grab(['model','model #','model no','model number']);
+  o.serial=grab(['serial','serial #','sn','serial number']);
+  o.serviceOrder=grab(['service order','service order #','so','order #','order no','order']);
+  o.caseNo=grab(['case','case #','case no','case number']);
+  o.jobId=grab(['job id','service job id','job #','job']);
+  o.issue=grab(['issue','problem','fault','symptom','complaint','concern','re','regarding']);
+  if(!o.issue){
+    // fall back: strip label lines, keep the rest as the issue
+    const lines=text.split('\n').filter(ln=>!/^\s*(name|customer|client|cust|phone|tel|mobile|email|address|addr|location|model|serial|sn|service order|order|case|job)\s*[:\-]/i.test(ln));
+    o.issue=lines.join(' ').trim() || text.trim();
+  }
+  return o;
+}
+function showParsePreview(o){
+  const el=$('#parsePreview'); el.classList.remove('hide');
+  const row=(k,label,v)=>`<div class="field"><label>${esc(label)}</label><input id="pp_${k}" value="${esc(v||'')}"></div>`;
+  el.innerHTML=`<div class="callout">Review &amp; edit, then create the job.</div>
+    <div class="grid2">
+      ${row('customer','Customer',o.customer)}
+      ${row('phone','Phone',o.phone)}
+      ${row('address','Address',o.address)}
+      ${row('email','Email',o.email)}
+      ${row('model','Model #',o.model)}
+      ${row('serial','Serial #',o.serial)}
+      ${row('serviceOrder','Service Order #',o.serviceOrder)}
+      ${row('caseNo','Case #',o.caseNo)}
+      ${row('jobId','Service Job ID',o.jobId)}
+    </div>
+    <div class="field full" style="margin-top:10px"><label>Reported issue</label><textarea id="pp_issue">${esc(o.issue||'')}</textarea></div>
+    <div style="display:flex;gap:8px;margin-top:12px"><button class="btn pri" id="createFromIntake">Create job →</button></div>`;
+  $('#createFromIntake').onclick=()=>{
+    const g=k=>{ const e=$('#pp_'+k); return e?e.value.trim():''; };
+    const j=newJob({ customer:g('customer'),phone:g('phone'),address:g('address'),email:g('email'),
+      model:g('model'),serial:g('serial'),serviceOrder:g('serviceOrder'),caseNo:g('caseNo'),jobId:g('jobId'),
+      issue:g('issue'), source: $('#intakeText').value.match(/@/)?'email':'sms' });
+    logEvent(j,'Created from pasted '+(j.source));
+    STATE.jobs[j.id]=j; persist(); closeOverlay('#intakeOverlay'); renderJobs(); renderAgenda();
+    toast('Job created'); openJob(j.id);
+    if(j.address){ geocode(j.address).then(gg=>{ if(gg){ j.lat=gg.lat; j.lng=gg.lng; persist(); refreshMapMarkers(); } }).catch(()=>{}); }
+  };
+}
+
+/* ===================== EXPORT ===================== */
+function exportCSV(){
+  const cols=['Service Job ID','Service Order #','Case #','Status','Customer','Phone','Email','Address','Model','Serial','Issue','Received','Next appt','Estimate total','Travel total'];
+  const rows=jobsArr().map(j=>{
+    const t=jobEstimateTotal(j); const na=upcomingApptOf(j);
+    return [j.jobId,j.serviceOrder,j.caseNo,statusMeta(j.status).label,j.customer,j.phone,j.email,j.address,j.model,j.serial,
+      (j.issue||'').replace(/\s+/g,' '), j.received, na?(fmtDate(na.date)+' '+fmt12(na.time)):'', t.toFixed(2), travelTotalFor(j).toFixed(2)];
+  });
+  const csv=[cols,...rows].map(r=>r.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a');
+  a.href=url; a.download='repair-desk-jobs.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+  toast('CSV exported');
+}
+function jobEstimateTotal(j){
+  const labour=(+j.estLabourHours||0)*(+STATE.settings.labourRate||0);
+  const parts=(j.estParts||[]).reduce((s,p)=>s+(+p.qty||0)*(+p.price||0),0);
+  const sub=labour+parts; return sub+sub*(+STATE.settings.taxRate||0)/100;
+}
+function backupJson(){
+  const blob=new Blob([JSON.stringify(STATE,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='repair-desk-backup-'+todayISO()+'.json'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+  toast('Backup downloaded');
+}
+function restoreJson(file){
+  const r=new FileReader();
+  r.onload=()=>{ try{ const d=JSON.parse(r.result); if(!d.jobs){ toast('Not a valid backup'); return; }
+    if(!confirm('Replace all current data with this backup?')) return;
+    STATE.jobs=d.jobs||{}; STATE.settings=Object.assign({...DEFAULT_SETTINGS},d.settings||{}); normalize(); persist();
+    renderJobs(); renderAgenda(); refreshMapMarkers(); fillSettings(); toast('Backup restored');
+  }catch(e){ toast('Could not read file'); } };
+  r.readAsText(file);
+}
+
+/* ===================== PASSCODE ===================== */
+async function hashPw(pw){
+  try{ const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('rd1:'+pw)); return 's:'+[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join(''); }
+  catch(e){ let h=5381; for(const c of ('rd1:'+pw)) h=((h<<5)+h+c.charCodeAt(0))>>>0; return 'd:'+h; }
+}
+async function verifyPw(pw,hash){ return (await hashPw(pw))===hash; }
+function fbMode(){ return !!window.__fbConfigured; } // secured cloud sign-in vs local passcode
+function lockApp(){
+  const fb=fbMode();
+  $('#lockEmail').classList.toggle('hide', !fb);
+  $('#lockTitle').textContent = fb ? 'Sign in' : 'Repair Desk';
+  $('#lockMsg').textContent = fb ? 'Sign in with your Repair Desk account' : 'Enter your passcode';
+  $('#lockPw').placeholder = fb ? 'password' : 'passcode';
+  $('#lockGo').textContent = fb ? 'Sign in' : 'Unlock';
+  $('#lock').classList.add('open'); $('#lockPw').value=''; $('#lockErr').textContent='';
+  setTimeout(()=>{ (fb?$('#lockEmail'):$('#lockPw')).focus(); },50);
+}
+function unlockOK(){ try{ sessionStorage.setItem(LS.admin,'1'); }catch(e){} $('#lock').classList.remove('open'); }
+async function tryUnlock(){
+  if(fbMode()){
+    const email=$('#lockEmail').value.trim(), pw=$('#lockPw').value;
+    if(!email||!pw){ $('#lockErr').textContent='Enter email and password'; return; }
+    $('#lockErr').textContent='Signing in…';
+    try{ await window.__fbSignIn(email,pw); /* onSignedIn hides the lock */ }
+    catch(e){ $('#lockErr').textContent = (e&&e.code? e.code.replace('auth/','').replace(/-/g,' ') : 'Sign-in failed'); $('#lockPw').select(); }
+    return;
+  }
+  const pw=$('#lockPw').value;
+  if(await verifyPw(pw, STATE.settings.pwHash)){ unlockOK(); }
+  else { $('#lockErr').textContent='Wrong passcode'; $('#lockPw').select(); }
+}
+function maybeLock(){
+  if(fbMode()){ lockApp(); return; }          // cloud mode: always require sign-in
+  if(!STATE.settings.pwHash) return;           // local mode, no passcode set
+  let unlocked=false; try{ unlocked=sessionStorage.getItem(LS.admin)==='1'; }catch(e){}
+  if(!unlocked) lockApp();
+}
+
+/* ===================== SETTINGS ===================== */
+function fillSettings(){
+  const s=STATE.settings;
+  $('#set_tech').value=s.tech||''; $('#set_cur').value=s.currency||'$';
+  $('#set_labour').value=s.labourRate; $('#set_mileage').value=s.mileageRate; $('#set_tax').value=s.taxRate;
+  $('#pwState').textContent = s.pwHash ? 'A passcode is set. Enter a new one to change it, or clear both boxes and save to remove it.' : 'No passcode set — the app opens without a lock.';
+}
+function saveSettings(){
+  const s=STATE.settings;
+  s.tech=$('#set_tech').value.trim(); s.currency=$('#set_cur').value.trim()||'$';
+  s.labourRate=+$('#set_labour').value||0; s.mileageRate=+$('#set_mileage').value||0; s.taxRate=+$('#set_tax').value||0;
+  persist(); toast('Settings saved');
+}
+async function savePw(){
+  const a=$('#set_pw1').value, b=$('#set_pw2').value;
+  if(!a && !b){ STATE.settings.pwHash=''; persist(); fillSettings(); toast('Passcode removed'); return; }
+  if(a.length<4){ toast('Passcode must be at least 4 characters'); return; }
+  if(a!==b){ toast('Passcodes do not match'); return; }
+  STATE.settings.pwHash=await hashPw(a); persist(); $('#set_pw1').value=''; $('#set_pw2').value=''; fillSettings(); toast('Passcode updated');
+}
+
+/* ===================== PATCH NOTES / WHAT'S NEW ===================== */
+function pnEntryHTML(e,cur){ return `<div class="pn-entry ${e.v===cur?'pn-current':''}"><div class="pv">v${e.v} · ${esc(e.date)}</div><h4>${esc(e.title)}</h4><ul>${e.notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul></div>`; }
+function renderPatchNotes(){ $('#patchNotes').innerHTML=PATCH_NOTES.map(e=>pnEntryHTML(e,APP_VERSION)).join(''); $('#verLine').textContent='v'+APP_VERSION; }
+function checkWhatsNew(freshInstall){
+  let seen=null; try{ seen=localStorage.getItem(LS.seen); }catch(e){}
+  if(freshInstall){ try{ localStorage.setItem(LS.seen,String(APP_VERSION)); }catch(e){} return; }
+  let show=[];
+  if(seen==null) show=[PATCH_NOTES[0]];
+  else if(+seen<APP_VERSION) show=PATCH_NOTES.filter(e=>e.v>+seen);
+  if(!show.length) return;
+  $('#whatsnewBody').innerHTML=show.map(e=>pnEntryHTML(e,APP_VERSION)).join('');
+  openOverlay('#whatsnewOverlay');
+  try{ localStorage.setItem(LS.seen,String(APP_VERSION)); }catch(e){}
+}
+
+/* ===================== OVERLAY + TABS + WIRING ===================== */
+function openOverlay(sel){ $(sel).classList.add('open'); }
+function closeOverlay(sel){ $(sel).classList.remove('open'); }
+function switchTab(tab){
+  $$('#tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  $$('.panel').forEach(p=>p.classList.toggle('active',p.id==='tab-'+tab));
+  if(tab==='map'){ setTimeout(()=>{ initMap(); if(map) map.invalidateSize(); refreshMapMarkers(); },60); }
+  if(tab==='schedule') renderAgenda();
+}
+
+function boot(){
+  let fresh=false; try{ fresh=localStorage.getItem(LS.data)==null; }catch(e){}
+  loadLocal();
+  fillSettings();
+  renderJobs(); renderAgenda(); renderPatchNotes();
+
+  // sync pill
+  $('#syncPill').className='pill '+(SYNC_ENABLED?'on':'off');
+  $('#syncPill').innerHTML=`<span class="dot"></span>${SYNC_ENABLED?'Live · synced':'Local only'}`;
+
+  // tabs
+  $$('#tabs button').forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
+  // header
+  $('#newBtn').onclick=$('#newBtn2').onclick=()=>openJob(null);
+  $('#intakeBtn').onclick=()=>{ $('#intakeText').value=''; $('#parsePreview').classList.add('hide'); $('#parsePreview').innerHTML=''; openOverlay('#intakeOverlay'); };
+  $('#themeBtn').onclick=toggleTheme;
+  $('#lockBtn').onclick=()=>{
+    if(fbMode()){ if(window.__fbSignOut) window.__fbSignOut(); try{sessionStorage.removeItem(LS.admin);}catch(e){} lockApp(); return; }
+    if(!STATE.settings.pwHash){ toast('Set a passcode in Settings first'); switchTab('settings'); return; }
+    try{sessionStorage.removeItem(LS.admin);}catch(e){} lockApp();
+  };
+  // intake
+  $('#parseBtn').onclick=()=>{ const t=$('#intakeText').value.trim(); if(!t){ toast('Paste a message first'); return; } showParsePreview(parseIntake(t)); };
+  // job list clicks
+  $('#jobList').onclick=e=>{ const c=e.target.closest('[data-open]'); if(c) openJob(c.dataset.open); };
+  $('#jobSearch').oninput=renderJobs;
+  $('#statusChips').onclick=e=>{ const c=e.target.closest('[data-status]'); if(c){ activeStatus=c.dataset.status; renderJobs(); } };
+  // job editor
+  $('#saveJob').onclick=saveJobFromForm;
+  $('#deleteJob').onclick=()=>{ if(!editingId||!STATE.jobs[editingId]) { closeOverlay('#jobOverlay'); return; }
+    if(!confirm('Delete this job permanently?')) return; delete STATE.jobs[editingId]; persist(); closeOverlay('#jobOverlay'); renderJobs(); renderAgenda(); refreshMapMarkers(); toast('Job deleted'); };
+  // map
+  $('#mapSearch').oninput=refreshMapMarkers;
+  $('#geocodeAll').onclick=geocodeMissing;
+  // schedule chips
+  $$('[data-sched]').forEach(b=>b.onclick=()=>{ activeSched=b.dataset.sched; $$('[data-sched]').forEach(x=>x.classList.toggle('active',x===b)); renderAgenda(); });
+  // settings
+  $('#saveSettings').onclick=saveSettings;
+  $('#savePw').onclick=savePw;
+  $('#exportAll').onclick=exportCSV;
+  $('#backupJson').onclick=backupJson;
+  $('#restoreJson').onclick=()=>$('#restoreFile').click();
+  $('#restoreFile').onchange=e=>{ if(e.target.files[0]) restoreJson(e.target.files[0]); e.target.value=''; };
+  // lock
+  $('#lockGo').onclick=tryUnlock;
+  $('#lockPw').onkeydown=e=>{ if(e.key==='Enter') tryUnlock(); };
+  $('#lockEmail').onkeydown=e=>{ if(e.key==='Enter') tryUnlock(); };
+  // overlays: close buttons + click-outside
+  $$('[data-close]').forEach(b=>b.onclick=()=>b.closest('.overlay').classList.remove('open'));
+  $$('.overlay').forEach(o=>o.onclick=e=>{ if(e.target===o) o.classList.remove('open'); });
+
+  maybeLock();
+  checkWhatsNew(fresh);
+}
+function toggleTheme(){
+  const dark=document.documentElement.getAttribute('data-theme')==='dark';
+  if(dark){ document.documentElement.removeAttribute('data-theme'); try{localStorage.setItem(LS.theme,'light');}catch(e){} }
+  else { document.documentElement.setAttribute('data-theme','dark'); try{localStorage.setItem(LS.theme,'dark');}catch(e){} }
+  if(map) setTimeout(()=>map.invalidateSize(),50);
+}
+
+/* ---- bridge to the Firebase module (below). Active only once signed in. ---- */
+window.__getState = () => STATE;
+// newest-wins: only apply remote if it's newer than what we have (avoids clobbering a local edit mid-save)
+window.__applyRemote = val => {
+  if(!val) return;
+  try{
+    if((val.savedAt||0) < (STATE.savedAt||0)) return; // our local copy is newer
+    STATE.jobs = val.jobs||{}; STATE.settings = Object.assign({...DEFAULT_SETTINGS}, val.settings||{}); STATE.savedAt = val.savedAt||Date.now();
+    try{ localStorage.setItem(LS.data, JSON.stringify(STATE)); }catch(e){}
+    normalize(); renderJobs(); renderAgenda(); refreshMapMarkers(); fillSettings();
+  }catch(e){ console.warn('applyRemote',e); }
+};
+window.__setSync = s => {
+  const p=$('#syncPill'); if(!p) return;
+  if(s==='on'){ p.className='pill on'; p.innerHTML='<span class="dot"></span>Live · synced'; }
+  else if(s==='err'){ p.className='pill off'; p.innerHTML='<span class="dot" style="background:var(--bad)"></span>Sync error'; }
+  else { p.className='pill off'; p.innerHTML='<span class="dot"></span>Local only'; }
+};
+window.__onSignedIn = user => { SYNC_ENABLED=true; unlockOK(); $('#syncPill').title = user&&user.email ? ('Signed in as '+user.email) : ''; };
+window.__onSignedOut = () => { SYNC_ENABLED=false; window.__setSync('off'); lockApp(); };
+
+document.addEventListener('DOMContentLoaded',boot);
+</script>
+
+<!-- ===================== Secured Firebase sync (dedicated project; email/password auth) =====================
+     Paste the config from YOUR OWN dedicated Firebase project between the markers below.
+     Until a real apiKey is present, the app runs 100% local (no cloud, local passcode gate). -->
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js';
+import { getDatabase, ref, set, onValue } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js';
+
+/* === FIREBASE_CONFIG_START === repair-desk-3bc6a (dedicated project, email/password auth) === */
+const firebaseConfig = {
+  apiKey: "AIzaSyBrSBEyAYC5fksywLUvfhUYvtd1DF-srHc",
+  authDomain: "repair-desk-3bc6a.firebaseapp.com",
+  databaseURL: "https://repair-desk-3bc6a-default-rtdb.firebaseio.com",
+  projectId: "repair-desk-3bc6a",
+  storageBucket: "repair-desk-3bc6a.firebasestorage.app",
+  messagingSenderId: "666491861373",
+  appId: "1:666491861373:web:71d1c2c6f1df6da8d97414"
+};
+/* === FIREBASE_CONFIG_END === */
+
+const configured = firebaseConfig.apiKey && !/PASTE/.test(firebaseConfig.apiKey) && !/PASTE/.test(firebaseConfig.databaseURL||'');
+if(configured){
+  window.__fbConfigured = true;
+  try{
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getDatabase(app);
+    const node = ref(db, 'repairdesk/main');
+    let echo = false, pushedInitial = false;
+
+    try{ await setPersistence(auth, browserLocalPersistence); }catch(e){}
+
+    window.__fbSignIn  = (email,pw) => signInWithEmailAndPassword(auth, email, pw);
+    window.__fbSignOut = () => signOut(auth);
+    window.__fbWrite = obj => {
+      if(!auth.currentUser) return;
+      echo = true;
+      set(node, obj).catch(e=>{ console.warn('fb write',e); window.__setSync&&window.__setSync('err'); })
+                    .finally(()=>{ setTimeout(()=>{ echo=false; }, 500); });
+    };
+
+    onAuthStateChanged(auth, user => {
+      if(user){
+        window.__onSignedIn && window.__onSignedIn(user);
+        onValue(node, snap => {
+          if(echo) return;                       // ignore our own write echo
+          const v = snap.val();
+          if(v){ window.__applyRemote && window.__applyRemote(v); }
+          else if(!pushedInitial){ pushedInitial=true; try{ window.__fbWrite(window.__getState()); }catch(e){} } // seed empty cloud from local
+          window.__setSync && window.__setSync('on');
+        }, err => { console.warn('fb read',err); window.__setSync && window.__setSync('err'); });
+      } else {
+        window.__onSignedOut && window.__onSignedOut();
+      }
+    });
+  }catch(e){ console.warn('Firebase init failed',e); window.__fbConfigured=false; }
+}
+</script>
+</body>
+</html>
