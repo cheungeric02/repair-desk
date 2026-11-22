@@ -1,7 +1,7 @@
 /* Repair Desk service worker.
    CACHE number MUST equal APP_VERSION in index.html — bump both together.
    cheungeric02.github.io is shared by several apps, so this worker only ever deletes its OWN old caches. */
-const CACHE = 'rd-shell-v3';
+const CACHE = 'rd-shell-v4';
 const CDN_CACHE = 'rd-cdn-v1';     // pinned-version libraries (Firebase SDK, Leaflet) so the app starts with no signal
 const SHARE_CACHE = 'rd-share';    // holds a shared text until the page creates the job (or the intake is closed)
 const SHELL = ['./', 'index.html', 'manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];

@@ -15,7 +15,8 @@
   --bg:#f4f6fb; --surface:#ffffff; --surface2:#eef2f9; --ink:#15233b; --muted:#5f6b80;
   --line:#dde4ef; --primary:#1b5e9e; --primary-ink:#ffffff; --primary-soft:#e4eefb;
   --accent:#6750a4; --radius:18px; --shadow:0 2px 10px rgba(20,40,80,.07),0 10px 30px rgba(20,40,80,.06);
-  --new:#e5484d; --scheduled:#f5a623; --evaluated:#4c6ef5; --ordered:#9b59b6; --arrived:#1faa59; --completed:#8794a8;
+  --new:#e5484d; --scheduled:#f5a623; --evaluated:#4c6ef5; --toestimate:#e8590c; --approved:#0b9ca8; --toorder:#c2255c;
+  --ordered:#9b59b6; --arrived:#1faa59; --completed:#8794a8;
   --good:#1faa59; --bad:#e5484d; --warn:#f5a623;
 }
 :root[data-theme="dark"]{
@@ -84,6 +85,7 @@ main{padding:14px 16px 90px;max-width:1200px;margin:0 auto}
 .sbadge{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;padding:4px 10px;border-radius:999px;
   color:#fff}
 .s-new{background:var(--new)} .s-scheduled{background:var(--scheduled)} .s-evaluated{background:var(--evaluated)}
+.s-to_estimate{background:var(--toestimate)} .s-est_approved{background:var(--approved)} .s-parts_to_order{background:var(--toorder)}
 .s-parts_ordered{background:var(--ordered)} .s-parts_arrived{background:var(--arrived)} .s-completed{background:var(--completed)}
 
 /* job cards */
@@ -95,8 +97,13 @@ main{padding:14px 16px 90px;max-width:1200px;margin:0 auto}
 .jcard:hover{transform:translateY(-2px)}
 .jcard.s-new{border-left-color:var(--new)} .jcard.s-scheduled{border-left-color:var(--scheduled)}
 .jcard.s-evaluated{border-left-color:var(--evaluated)} .jcard.s-parts_ordered{border-left-color:var(--ordered)}
+.jcard.s-to_estimate{border-left-color:var(--toestimate)} .jcard.s-est_approved{border-left-color:var(--approved)}
+.jcard.s-parts_to_order{border-left-color:var(--toorder)}
 .jcard.s-parts_arrived{border-left-color:var(--arrived)} .jcard.s-completed{border-left-color:var(--completed);opacity:.82}
 .jcard h3{font-size:16px;margin-bottom:2px}
+.jcard h3 .tel{font-size:13px;font-weight:600;color:var(--primary);text-decoration:none;white-space:nowrap;margin-left:6px}
+.jcard .navlink{color:var(--primary);text-decoration:none;font-weight:700}
+.paidtag{font-weight:800;color:var(--good)} .unpaidtag{font-weight:800;color:var(--bad)}
 .jcard .sub{color:var(--muted);font-size:13px;margin:2px 0}
 .jcard .row{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-top:8px}
 .jcard .ids{font-size:12px;color:var(--muted);font-family:ui-monospace,Consolas,monospace}
@@ -149,6 +156,22 @@ main{padding:14px 16px 90px;max-width:1200px;margin:0 auto}
 /* line-item lists */
 .litem{display:grid;gap:8px;align-items:end;border:1px dashed var(--line);border-radius:12px;padding:10px;margin-bottom:8px;background:var(--bg)}
 .litem .delrow{display:flex;justify-content:flex-end}
+/* parts rows: on a phone the part # gets its own full-width row so it is never cut off */
+.pitem{grid-template-columns:minmax(0,.7fr) minmax(0,1fr) minmax(0,1.3fr)}
+.pitem .f-pn,.pitem .f-desc,.pitem .f-track{grid-column:1/-1}
+.pitem .f-pn input{font-family:ui-monospace,Consolas,monospace;font-weight:700;letter-spacing:.02em}
+.pitem .ltot{font-size:12px;color:var(--muted);text-align:right;grid-column:1/-1}
+@media(min-width:620px){
+  .pitem{grid-template-columns:minmax(170px,1.3fr) 2fr 70px 110px}
+  .pitem .f-pn,.pitem .f-desc{grid-column:auto}
+  .pitem .f-status{grid-column:1/2} .pitem .f-track{grid-column:2/-1}
+}
+.chk{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;font-size:14px;font-weight:600;margin:4px 0 10px;cursor:pointer}
+.chk .chkt{flex:1;min-width:0}
+.chk input{flex:none}
+.chk .hint{flex-basis:100%;padding-left:26px;font-weight:400}
+.chk input{width:18px;height:18px}
+.subhead{font-size:13px;font-weight:800;color:var(--muted);margin:14px 0 6px;text-transform:uppercase;letter-spacing:.04em}
 .totrow{display:flex;justify-content:space-between;padding:6px 2px;font-size:14px}
 .totrow.big{font-weight:800;font-size:16px;border-top:1px solid var(--line);margin-top:6px;padding-top:10px}
 .callout{background:var(--primary-soft);border-radius:12px;padding:10px 12px;font-size:13px;color:var(--ink);margin:4px 0 10px}
@@ -249,7 +272,7 @@ main{padding:14px 16px 90px;max-width:1200px;margin:0 auto}
     </div>
     <div id="map"></div>
     <div class="legend" id="mapLegend"></div>
-    <p class="hint">Tip: drag a pin to correct its position — it saves to the job. “Place missing pins” geocodes any job address without a location yet (free OpenStreetMap).</p>
+    <p class="hint">Tip: tap a pin for <b>Google Maps</b> / <b>Directions</b> (opens the Google Maps app on your phone). Drag a pin to correct its position — it saves to the job. “Place missing pins” locates any job address without a location yet (unit numbers are ignored for the lookup).</p>
   </section>
 
   <!-- SCHEDULE -->
@@ -294,21 +317,25 @@ main{padding:14px 16px 90px;max-width:1200px;margin:0 auto}
         <button class="btn" id="restoreJson">↩️ Restore from backup</button>
         <input type="file" id="restoreFile" accept="application/json" class="hide">
       </div>
-      <p class="hint" style="margin-top:10px">Everything is stored in this browser (<code>localStorage</code>). Download a backup regularly until cloud sync is enabled.</p>
+      <p class="hint" style="margin-top:10px">Jobs sync between your devices through your secured cloud database, and a copy is kept on each device for offline use. A downloaded backup is still a good idea now and then.</p>
     </div></div>
   </section>
 
   <!-- HELP -->
   <section class="panel" id="tab-help">
     <div class="sec" open><summary>How it works</summary><div class="inner" style="font-size:14px;color:var(--muted)">
-      <p><b>New request → Scheduled → Evaluated → Parts ordered → Parts arrived → Completed.</b> Set a job's status as it moves along; the map colours each pin by status so parts-arrived jobs (green) stand out as ready to go back out.</p>
+      <p><b>New request → Scheduled → Evaluated → To be estimated → Estimate approved → Parts to be ordered → Parts ordered → Parts arrived → Completed.</b> Set a job's status as it moves along; the map colours each pin by status so parts-arrived jobs (green) stand out as ready to go back out.</p>
+      <p><b>Parts move the job along:</b> in <b>Estimate &amp; parts</b>, set a part to <b>Ordered</b> and the job becomes <b>Parts ordered</b>; once every part is <b>Arrived</b> the job becomes <b>Parts arrived</b> (a Completed job is never moved back).</p>
+      <p><b>Invoice #:</b> made automatically as <code>yymmdd-phone</code> from the received date and the customer's phone (a second job for the same phone on the same day gets <code>-2</code>). You can still type your own.</p>
       <p><b>Paste text/email:</b> top-right button — paste a customer SMS or email and the app pulls out name, phone, address and the problem into a new draft you confirm.</p>
       <p><b>Scheduling:</b> add one or more appointments to a job (evaluation, repair, follow-up). Each has an <b>Add to calendar</b> button (downloads an .ics that imports into Google/Outlook/Apple Calendar) and a Google Calendar quick-add link.</p>
-      <p><b>Quote vs expenses:</b> the <b>Customer estimate</b> section (labour + parts) is what you share with the customer. <b>Travel expenses</b> are kept separate and only appear in the company expense claim — never on the customer quote.</p>
+      <p><b>Estimate:</b> labour + parts + wall mount + travel (+ tax) is what you share with the customer. Travel is on the estimate when <b>Include travel on the customer estimate</b> is ticked; the same travel lines still make up the company expense claim. <b>Internal notes</b> never go on the quote.</p>
+      <p><b>Payment:</b> record paid / amount / date / method in the job; paid jobs show a 💵 badge, finished-but-unpaid ones show ⚠ Unpaid.</p>
+      <p><b>Google Maps:</b> 🧭 buttons (job card, job editor, schedule, map pins) open Google Maps directions — on your phone they open the Google Maps app.</p>
       <p><b>Copy for ServiceBench / Salesforce:</b> the 📋 button beside each field copies just that value.</p>
     </div></div>
     <div class="sec"><summary>⚠️ Data &amp; privacy note</summary><div class="inner" style="font-size:14px;color:var(--muted)">
-      <p>This build stores customer names, addresses and phone numbers <b>locally in your browser only</b>, behind the passcode. Cloud sync (phone ↔ desktop) is wired but <b>off</b> until a secured Firebase project (with sign-in rules) is set up — a passcode alone on a shared database would leave the data readable. Ask to turn on secured sync when you're ready.</p>
+      <p>Customer names, addresses and phone numbers sync through a <b>dedicated, secured Firebase project</b> that only a signed-in account can read or write. A copy stays on each signed-in device so the app works offline — sign out on any device you no longer use.</p>
     </div></div>
     <div class="sec"><summary>🆕 Patch notes</summary><div class="inner" id="patchNotes"></div></div>
     <p class="hint" style="text-align:center">Repair Desk · <span id="verLine"></span></p>
@@ -366,11 +393,22 @@ window.RD_FB_CONFIG = {
 </script>
 <script>
 /* ===================== Repair Desk — app logic ===================== */
-const APP_VERSION = 3;   // MUST equal the cache number in sw.js (rd-shell-vN)
+const APP_VERSION = 4;   // MUST equal the cache number in sw.js (rd-shell-vN)
 const LS = { data:'repairdesk_data', theme:'repairdesk_theme', admin:'repairdesk_admin', seen:'repairdesk_lastSeenVer',
              outbox:'repairdesk_outbox', signedIn:'repairdesk_signedIn' };
 
 const PATCH_NOTES = [
+  { v:4, date:'2026-11-22', title:'Estimates, payments & Google Maps', notes:[
+    'New statuses after Evaluated: To be estimated → Estimate approved → Parts to be ordered.',
+    'Parts now live inside the estimate (one list with part #, price, status and tracking). Parts can be “To order”, “Ordered” or “Arrived” — ordering a part moves the job to Parts ordered, and once every part has arrived it moves to Parts arrived.',
+    'Automatic invoice # (yymmdd-phone) on every job, with a copy button.',
+    'Travel can now go on the customer estimate (tick box), plus a Wall mount price and private internal notes that never appear on the quote.',
+    'New Payment section: paid, amount, date and method — with a 💵 Paid / ⚠ Unpaid badge on the job list.',
+    'Customer phone shown beside the name on the job list (tap to call).',
+    'Locate now finds addresses with a unit # (Unit 510, #510, Apt, Suite, 510-2015 …).',
+    'On a phone the part # gets a full-width row so it’s never cut off.',
+    '🧭 Directions buttons open Google Maps (the app, on your phone) from the job list, job, schedule and map pins.'
+  ]},
   { v:3, date:'2026-11-21', title:'Works with no signal', notes:[
     'No signal? Keep working — changes are saved on this phone and sync by themselves when you’re back online (the pill at the top shows how many are waiting).',
     'Two devices can now edit at the same time: only the fields you actually changed are sent, so the phone and the desktop no longer overwrite each other.',
@@ -399,11 +437,18 @@ const STATUSES = [
   {k:'new',           label:'New request',  short:'New',        color:'var(--new)'},
   {k:'scheduled',     label:'Scheduled',    short:'Scheduled',  color:'var(--scheduled)'},
   {k:'evaluated',     label:'Evaluated',    short:'Evaluated',  color:'var(--evaluated)'},
+  {k:'to_estimate',   label:'To be estimated', short:'To estimate', color:'var(--toestimate)'},
+  {k:'est_approved',  label:'Estimate approved', short:'Approved', color:'var(--approved)'},
+  {k:'parts_to_order',label:'Parts to be ordered', short:'To order', color:'var(--toorder)'},
   {k:'parts_ordered', label:'Parts ordered',short:'Ordered',    color:'var(--ordered)'},
   {k:'parts_arrived', label:'Parts arrived',short:'Arrived',    color:'var(--arrived)'},
   {k:'completed',     label:'Completed',    short:'Completed',  color:'var(--completed)'},
 ];
-const STATUS_HEX = { new:'#e5484d', scheduled:'#f5a623', evaluated:'#4c6ef5', parts_ordered:'#9b59b6', parts_arrived:'#1faa59', completed:'#8794a8' };
+const STATUS_HEX = { new:'#e5484d', scheduled:'#f5a623', evaluated:'#4c6ef5', to_estimate:'#e8590c', est_approved:'#0b9ca8', parts_to_order:'#c2255c',
+                     parts_ordered:'#9b59b6', parts_arrived:'#1faa59', completed:'#8794a8' };
+const STATUS_IDX = k => STATUSES.findIndex(s=>s.k===k);
+const PART_STATUSES = [{k:'to_order',label:'To order'},{k:'ordered',label:'Ordered'},{k:'arrived',label:'Arrived'}];
+const PAY_METHODS = ['','Cash','Debit','Credit card','E-transfer','Cheque','Other'];
 const APPT_TYPES = [{k:'evaluation',label:'Evaluation visit'},{k:'repair',label:'Repair visit'},{k:'followup',label:'Follow-up'}];
 
 /* ---- helpers ---- */
@@ -441,8 +486,9 @@ function newJob(seed={}){
     status:'new', priority:'normal',
     lat:null, lng:null, geoQuery:'',
     appts:[], parts:[],
-    estLabourHours:'', estParts:[], estNotes:'',
-    travel:[],
+    estLabourHours:'', estParts:[], estNotes:'', estInternal:'', wallMount:'', invoiceNo:'',
+    travel:[], travelOnEstimate:true,
+    paid:false, paidAmount:'', paidDate:'', paidMethod:'',
     diagnosis:'', repairNotes:'', closedDate:'',
     log:[], createdAt:Date.now(), updatedAt:Date.now()
   }, seed);
@@ -561,6 +607,80 @@ function normalize(){
 }
 function logEvent(j,text){ j.log.unshift({ts:Date.now(),text}); if(j.log.length>200) j.log.length=200; }
 
+/* ===================== parts / estimate / invoice helpers ===================== */
+/* One parts list per job. Older jobs kept quote lines in j.estParts (no part #/status) and repair parts in j.parts
+   (no price); they are shown merged here and folded into j.parts the next time the job is saved — nothing is
+   rewritten until then. */
+function legacyPartStatus(jobStatus){ return jobStatus==='parts_arrived'||jobStatus==='completed' ? 'arrived' : jobStatus==='parts_ordered' ? 'ordered' : 'to_order'; }
+function mergedParts(j){
+  const out=(j.parts||[]).map(p=>Object.assign({pn:'',desc:'',qty:1,price:'',status:'ordered',track:''}, p));
+  const key=s=>String(s||'').trim().toLowerCase();
+  (j.estParts||[]).forEach(e=>{
+    const d=key(e.desc);
+    const hit = d && out.find(p=>(p.price===''||p.price==null) && (key(p.desc)===d || key(p.pn)===d));
+    if(hit) hit.price = e.price ?? '';
+    else out.push({id:e.id||uid(), pn:'', desc:e.desc||'', qty:e.qty||1, price:e.price ?? '', status:legacyPartStatus(j.status), track:''});
+  });
+  return out;
+}
+const lineTotal = p => (+p.qty||0)*(+p.price||0);
+const travelIncluded = j => j.travelOnEstimate!==false;   // older jobs (no flag) include travel
+function estimateOf(j){
+  const hours=+j.estLabourHours||0;
+  const labour=hours*(+STATE.settings.labourRate||0);
+  const parts=mergedParts(j).reduce((s,p)=>s+lineTotal(p),0);
+  const wall=+j.wallMount||0;
+  const travel=travelIncluded(j) ? travelTotalFor(j) : 0;
+  const sub=labour+parts+wall+travel, tax=sub*(+STATE.settings.taxRate||0)/100;
+  return {hours,labour,parts,wall,travel,sub,tax,total:sub+tax};
+}
+function jobEstimateTotal(j){ return estimateOf(j).total; }
+function travelTotalFor(j){ return (j.travel||[]).reduce((s,t)=> s + (t.amount!==''&&t.amount!=null?(+t.amount||0):(+t.km||0)*(+t.rate||0)),0); }
+
+/* invoice # = yymmdd-<phone digits>, from the received date (or the created date); a repeat for the same phone on
+   the same day gets -2, -3 … Saved on the job the first time it's saved with a phone, so it never changes later. */
+function invoiceBase(j){
+  let d=String(j.received||'');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d)){ const c=new Date(j.createdAt||Date.now()); d=`${c.getFullYear()}-${String(c.getMonth()+1).padStart(2,'0')}-${String(c.getDate()).padStart(2,'0')}`; }
+  let ph=String(j.phone||'').replace(/\D/g,''); if(ph.length===11&&ph[0]==='1') ph=ph.slice(1);
+  if(!ph) return '';
+  return d.slice(2,4)+d.slice(5,7)+d.slice(8,10)+'-'+ph;
+}
+function genInvoice(j){
+  const base=invoiceBase(j); if(!base) return '';
+  const others=jobsArr().filter(o=>o.id!==j.id);
+  const taken=new Set(others.filter(o=>o.invoiceNo).map(o=>o.invoiceNo));
+  const pick=b=>{ if(!taken.has(b)) return b; let n=2; while(taken.has(b+'-'+n)) n++; return b+'-'+n; };
+  // older jobs that don't have a stored number yet keep their place (oldest first), so the numbers shown never collide
+  const mine=j.createdAt||Date.now();
+  others.filter(o=>!o.invoiceNo && (o.createdAt||0)<mine).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0))
+    .forEach(o=>{ const b=invoiceBase(o); if(b) taken.add(pick(b)); });
+  return pick(base);
+}
+function invoiceFor(j){ return j.invoiceNo || genInvoice(j); }
+
+/* Google Maps deep links — on Android these open the Google Maps app */
+const gmapsSearch = q => 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q);
+const gmapsDir = q => 'https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(q);
+const gmapsQuery = j => (j.address && j.address.trim()) ? j.address : (j.lat!=null&&j.lng!=null ? j.lat+','+j.lng : '');
+
+/* drop unit / suite / apartment parts that make the free geocoder miss the building */
+const POSTAL_RE=/\b[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z][ -]?\d[ABCEGHJ-NPRSTV-Z]\d\b/i;
+function cleanAddress(a){
+  let s=String(a||'').replace(/\s+/g,' ').trim();
+  s=s.replace(/^\s*#?\s*[A-Za-z]?\d+[A-Za-z]?\s*-\s*(?=\d)/,'');   // "510-2015 Sheppard Ave" → "2015 Sheppard Ave"
+  // a unit word only counts when a unit number follows it, so "Upper Canada Dr" or "Sault Ste. Marie" survive
+  s=s.replace(/(^|[\s,])(?:unit|apt\.?|apartment|suite|ste\.?|room|rm\.?|ph|penthouse|floor|fl\.?)\s*(?:#|no\.?)?\s*[A-Za-z]?\d+[A-Za-z]?(?=[\s,]|$)/gi,'$1');
+  s=s.replace(/(^|[\s,])(?:unit|apt\.?|apartment|suite)\s*#?\s*[A-Za-z](?=[\s,]|$)/gi,'$1');   // "Unit B"
+  s=s.replace(/(^|[\s,])(?:bsmt|basement)(?:\s+(?:unit|apt\.?))?(?=[\s,]|$)/gi,'$1');
+  s=s.replace(/(^|[\s,])#\s*[A-Za-z]?\d+[A-Za-z]?(?=[\s,]|$)/g,'$1');   // "#510"
+  return s.replace(/\s*,\s*(,\s*)+/g,', ').replace(/^[\s,\-–]+|[\s,\-–]+$/g,'').replace(/\s{2,}/g,' ').replace(/\s+,/g,',');
+}
+function geocodeCandidates(addr){
+  const c=cleanAddress(addr), noPostal=c.replace(POSTAL_RE,'').replace(/\s*,\s*(,\s*)+/g,', ').replace(/^[\s,]+|[\s,]+$/g,'').trim();
+  return [...new Set([c, noPostal, String(addr||'').trim()].filter(Boolean))];
+}
+
 /* ===================== RENDER: jobs ===================== */
 function renderStats(){
   const arr=jobsArr();
@@ -570,6 +690,8 @@ function renderStats(){
     {n:arr.length,l:'Total'},
     {n:open,l:'Open'},
     {n:by('new'),l:'New'},
+    {n:by('to_estimate'),l:'To estimate'},
+    {n:by('parts_to_order'),l:'Parts to order'},
     {n:by('parts_ordered'),l:'Parts ordered'},
     {n:by('parts_arrived'),l:'Ready (arrived)'},
   ];
@@ -583,7 +705,7 @@ function renderStatusChips(){
 }
 function matchJob(j,q){
   if(!q) return true;
-  return [j.customer,j.address,j.jobId,j.serviceOrder,j.caseNo,j.model,j.serial,j.phone,j.issue]
+  return [j.customer,j.address,j.jobId,j.serviceOrder,j.caseNo,j.model,j.serial,j.phone,j.issue,j.invoiceNo]
     .some(v=>String(v||'').toLowerCase().includes(q));
 }
 function renderJobs(){
@@ -591,23 +713,25 @@ function renderJobs(){
   const q=$('#jobSearch').value.trim().toLowerCase();
   let arr=jobsArr().filter(j=>matchJob(j,q));
   if(activeStatus!=='all') arr=arr.filter(j=>j.status===activeStatus);
-  const order={new:0,scheduled:1,parts_arrived:2,parts_ordered:3,evaluated:4,completed:9};
-  arr.sort((a,b)=>(order[a.status]-order[b.status])||(b.updatedAt-a.updatedAt));
+  const order={new:0,scheduled:1,parts_arrived:2,parts_to_order:3,est_approved:4,to_estimate:5,evaluated:6,parts_ordered:7,completed:9};
+  arr.sort((a,b)=>((order[a.status]??5)-(order[b.status]??5))||((b.updatedAt||0)-(a.updatedAt||0)));
   const el=$('#jobList');
   if(!arr.length){ el.innerHTML=`<div class="empty" style="grid-column:1/-1"><div class="big">🗂️</div><p>No jobs yet. Tap <b>＋ New job</b> or <b>Paste text/email</b> to start.</p></div>`; return; }
   el.innerHTML=arr.map(j=>{
     const sm=statusMeta(j.status);
     const nextAppt=upcomingApptOf(j);
-    const ids=[j.jobId&&('Job '+j.jobId), j.serviceOrder&&('SO '+j.serviceOrder), j.caseNo&&('Case '+j.caseNo)].filter(Boolean).join(' · ');
+    const parts=mergedParts(j), inv=invoiceFor(j);
+    const ids=[inv&&('Inv '+inv), j.jobId&&('Job '+j.jobId), j.serviceOrder&&('SO '+j.serviceOrder), j.caseNo&&('Case '+j.caseNo)].filter(Boolean).join(' · ');
     return `<div class="jcard s-${j.status}" data-open="${j.id}">
-      <div class="row" style="margin-top:0"><h3>${esc(j.customer||'(no name)')}</h3><span class="sbadge s-${j.status}">${esc(sm.short)}</span></div>
+      <div class="row" style="margin-top:0"><h3>${esc(j.customer||'(no name)')}${j.phone?`<a class="tel" href="tel:${esc(String(j.phone).replace(/[^\d+]/g,''))}" data-stop>📞 ${esc(j.phone)}</a>`:''}</h3><span class="sbadge s-${j.status}">${esc(sm.short)}</span></div>
       <div class="sub">${esc(j.model||'Sony TV')}${j.serial?(' · '+esc(j.serial)):''}</div>
       <div class="sub">${esc(j.issue||'').slice(0,90)}${(j.issue||'').length>90?'…':''}</div>
       ${ids?`<div class="ids">${esc(ids)}</div>`:''}
       <div class="mini">
-        ${j.address?`<span>📍 ${esc(j.address).slice(0,40)}</span>`:''}
+        ${j.address?`<span>📍 ${esc(j.address.slice(0,40))} <a class="navlink" href="${esc(gmapsDir(j.address))}" target="_blank" rel="noopener" data-stop title="Directions in Google Maps">🧭</a></span>`:''}
         ${nextAppt?`<span>🗓️ <b>${esc(fmtDate(nextAppt.date))} ${esc(fmt12(nextAppt.time))}</b></span>`:''}
-        ${j.parts.length?`<span>🔩 ${j.parts.filter(p=>p.status==='arrived').length}/${j.parts.length} parts in</span>`:''}
+        ${parts.length?`<span>🔩 ${parts.filter(p=>p.status==='arrived').length}/${parts.length} parts in</span>`:''}
+        ${j.paid?`<span class="paidtag">💵 Paid${j.paidAmount!==''&&j.paidAmount!=null?(' '+esc(money(j.paidAmount))):''}</span>`:(j.status==='completed'?'<span class="unpaidtag">⚠ Unpaid</span>':'')}
       </div>
     </div>`;
   }).join('');
@@ -651,6 +775,7 @@ function jobForm(j){
     ${fld('Service Job ID','f_jobId',j.jobId,{copy:true,ph:'as provided'})}
     ${fld('Service Order # (ServiceBench)','f_serviceOrder',j.serviceOrder,{copy:true})}
     ${fld('Case # (Salesforce)','f_caseNo',j.caseNo,{copy:true})}
+    ${fld('Invoice # (auto: yymmdd-phone)','f_invoiceNo',j.invoiceNo,{copy:true,ph:genInvoice(j)||'add a phone number'})}
     <div class="field"><label>Intake source · received</label><div class="inwrap"><select id="f_source" style="max-width:120px">${srcOpts}</select><input id="f_received" type="date" value="${esc(j.received||todayISO())}"></div></div>
   </div></div></details>
 
@@ -663,6 +788,10 @@ function jobForm(j){
       <input id="f_latlng" value="${j.lat!=null&&j.lng!=null?(j.lat.toFixed(5)+', '+j.lng.toFixed(5)):''}" placeholder="not placed" readonly style="color:var(--muted)">
       <button type="button" class="btn sm" id="f_geocode">📍 Locate</button>
     </div></div>
+    <div class="field full" style="flex-direction:row;gap:8px;flex-wrap:wrap">
+      <button type="button" class="btn sm" id="f_gdir">🧭 Directions (Google Maps)</button>
+      <button type="button" class="btn sm ghost" id="f_gmap">🗺️ Show in Google Maps</button>
+    </div>
   </div></div></details>
 
   <details class="sec" open><summary>Sony TV &amp; problem</summary><div class="inner"><div class="grid2">
@@ -679,30 +808,36 @@ function jobForm(j){
     <button type="button" class="btn sm" id="addAppt">＋ Add appointment</button>
   </div></details>
 
-  <details class="sec"><summary>🔩 Parts (repair tracking)</summary><div class="inner">
-    <div class="hint" style="margin-bottom:8px">The actual parts you order for the repair. Mark each <b>Arrived</b> when it comes in — once all are in, set the job to <b>Parts arrived</b>.</div>
+  <details class="sec"><summary>💲 Estimate &amp; parts</summary><div class="inner">
+    <div class="callout">Labour, parts, wall mount and (if ticked below) travel make up the <b>customer quote</b>. Part status moves the job: <b>Ordered</b> → Parts ordered, all <b>Arrived</b> → Parts arrived.</div>
+    <div class="grid2">
+      <div class="field"><label>Estimated labour (hours)</label><input id="f_estHours" type="number" min="0" step="0.25" value="${esc(j.estLabourHours)}"></div>
+      <div class="field"><label>Wall mount (price, blank = none)</label><input id="f_wallMount" type="number" min="0" step="0.01" value="${esc(j.wallMount??'')}" placeholder="e.g. 149.99"></div>
+    </div>
+    <div class="subhead">Parts</div>
     <div id="partList"></div>
     <button type="button" class="btn sm" id="addPart">＋ Add part</button>
-  </div></details>
-
-  <details class="sec"><summary>💲 Customer estimate (quote)</summary><div class="inner">
-    <div class="callout">Goes to the <b>customer</b>. Travel expenses are <u>not</u> included here.</div>
-    <div class="field" style="max-width:220px"><label>Estimated labour (hours)</label><input id="f_estHours" type="number" min="0" step="0.25" value="${esc(j.estLabourHours)}"></div>
-    <p class="hint" style="margin:8px 0 4px">Estimated parts for the quote:</p>
-    <div id="estPartList"></div>
-    <button type="button" class="btn sm" id="addEstPart">＋ Add estimate part</button>
-    ${fld('Notes to customer','f_estNotes',j.estNotes,{type:'textarea',full:true})}
+    <label class="chk" style="margin-top:12px"><input type="checkbox" id="f_travelOnEst" ${travelIncluded(j)?'checked':''}><span class="chkt">Include travel on the customer estimate</span><span class="hint">(travel lines are in the 🚗 Travel section)</span></label>
+    ${fld('Notes to customer (on the quote)','f_estNotes',j.estNotes,{type:'textarea',full:true})}
+    <div style="margin-top:10px">${fld('🔒 Internal notes (never on the quote)','f_estInternal',j.estInternal,{type:'textarea',full:true,ph:'cost, supplier, approval details…'})}</div>
     <div id="estTotals" style="margin-top:10px"></div>
     <button type="button" class="btn" id="copyQuote" style="margin-top:8px">📋 Copy quote for customer</button>
   </div></details>
 
-  <details class="sec"><summary>🚗 Travel expenses (company only)</summary><div class="inner">
-    <div class="callout" style="background:color-mix(in srgb,var(--warn) 18%,transparent)">Company expense claim only — <b>never</b> shown to the customer or added to the quote.</div>
+  <details class="sec"><summary>🚗 Travel</summary><div class="inner">
+    <div class="callout" style="background:color-mix(in srgb,var(--warn) 18%,transparent)">Used for the company expense claim, and added to the customer estimate when <b>Include travel on the customer estimate</b> is ticked.</div>
     <div id="travelList"></div>
     <button type="button" class="btn sm" id="addTravel">＋ Add travel expense</button>
     <div id="travelTotal" style="margin-top:10px"></div>
     <button type="button" class="btn" id="copyExpense" style="margin-top:8px">📋 Copy expense claim</button>
   </div></details>
+
+  <details class="sec" ${j.paid?'open':''}><summary>💵 Payment</summary><div class="inner"><div class="grid2">
+    <div class="field"><label>Paid?</label><select id="f_paid"><option value="">Not paid</option><option value="1" ${j.paid?'selected':''}>Paid</option></select></div>
+    <div class="field"><label>Amount paid</label><input id="f_paidAmount" type="number" min="0" step="0.01" value="${esc(j.paidAmount??'')}" placeholder="${esc((+jobEstimateTotal(j)).toFixed(2))}"></div>
+    <div class="field"><label>Date paid</label><input id="f_paidDate" type="date" value="${esc(j.paidDate||'')}"></div>
+    <div class="field"><label>Method</label><select id="f_paidMethod">${PAY_METHODS.map(m=>`<option value="${esc(m)}" ${(j.paidMethod||'')===m?'selected':''}>${esc(m||'—')}</option>`).join('')}</select></div>
+  </div></div></details>
 
   <details class="sec"><summary>🛠️ Work performed</summary><div class="inner"><div class="grid2">
     ${fld('Diagnosis','f_diagnosis',j.diagnosis,{type:'textarea',full:true})}
@@ -717,21 +852,29 @@ let draft = null;
 function wireJobForm(j){
   draft = {
     appts: JSON.parse(JSON.stringify(j.appts||[])),
-    parts: JSON.parse(JSON.stringify(j.parts||[])),
-    estParts: JSON.parse(JSON.stringify(j.estParts||[])),
+    parts: JSON.parse(JSON.stringify(mergedParts(j))),   // repair parts + old quote-only lines, as one list
     travel: JSON.parse(JSON.stringify(j.travel||[])),
     lat:j.lat, lng:j.lng
   };
-  renderAppts(); renderParts(); renderEstParts(); renderTravel(); renderEstTotals(); renderTravelTotal();
+  renderAppts(); renderParts(); renderTravel(); renderEstTotals(); renderTravelTotal();
 
   $('#addAppt').onclick=()=>{ draft.appts.push({id:uid(),type:'evaluation',date:todayISO(),time:'09:00',duration:60,confirmed:false,notes:''}); renderAppts(); };
-  $('#addPart').onclick=()=>{ draft.parts.push({id:uid(),pn:'',desc:'',qty:1,status:'ordered',track:''}); renderParts(); };
-  $('#addEstPart').onclick=()=>{ draft.estParts.push({id:uid(),desc:'',qty:1,price:0}); renderEstParts(); renderEstTotals(); };
+  $('#addPart').onclick=()=>{ draft.parts.push({id:uid(),pn:'',desc:'',qty:1,price:'',status:'to_order',track:''}); renderParts(); renderEstTotals(); };
   $('#addTravel').onclick=()=>{ draft.travel.push({id:uid(),date:todayISO(),desc:'',km:'',rate:STATE.settings.mileageRate,amount:''}); renderTravel(); renderTravelTotal(); };
   $('#f_estHours').oninput=renderEstTotals;
+  $('#f_wallMount').oninput=renderEstTotals;
+  $('#f_travelOnEst').onchange=renderEstTotals;
   $('#copyQuote').onclick=()=>copyText(buildQuoteText(readForm(j)),'Quote');
   $('#copyExpense').onclick=()=>copyText(buildExpenseText(readForm(j)),'Expense claim');
   $('#f_geocode').onclick=()=>geocodeEditor(j);
+  const openG = fn => { const q=gmapsQuery({address:$('#f_address').value, lat:draft.lat, lng:draft.lng}); if(!q){ toast('Enter an address first'); return; } window.open(fn(q),'_blank','noopener'); };
+  $('#f_gdir').onclick=()=>openG(gmapsDir);
+  $('#f_gmap').onclick=()=>openG(gmapsSearch);
+  // live invoice suggestion as the phone / received date change
+  const invPh=()=>{ $('#f_invoiceNo').placeholder = genInvoice({id:j.id, createdAt:j.createdAt, phone:$('#f_phone').value, received:$('#f_received').value}) || 'add a phone number'; };
+  $('#f_phone').addEventListener('input',invPh); $('#f_received').addEventListener('input',invPh);
+  // marking it paid fills today's date and the estimate total if they're blank
+  $('#f_paid').onchange=()=>{ if($('#f_paid').value){ if(!$('#f_paidDate').value) $('#f_paidDate').value=todayISO(); if($('#f_paidAmount').value==='') $('#f_paidAmount').value=(+jobEstimateTotal(readForm(j))).toFixed(2); } };
   // copy buttons
   $$('#jobBody .copybtn').forEach(b=>b.onclick=()=>{ const v=b.closest('.inwrap').querySelector('input,textarea'); copyText((v?v.value:b.dataset.copy)||'', b.dataset.label); });
 }
@@ -762,26 +905,39 @@ function renderAppts(){
 }
 function renderParts(){
   const el=$('#partList');
-  el.innerHTML = draft.parts.map((p,i)=>`<div class="litem" style="grid-template-columns:1fr 2fr .6fr 1fr">
-    <div class="field"><label>Part #</label><input data-pt="pn" data-i="${i}" value="${esc(p.pn)}"></div>
-    <div class="field"><label>Description</label><input data-pt="desc" data-i="${i}" value="${esc(p.desc)}"></div>
-    <div class="field"><label>Qty</label><input type="number" min="1" data-pt="qty" data-i="${i}" value="${esc(p.qty||1)}"></div>
-    <div class="field"><label>Status</label><select data-pt="status" data-i="${i}"><option value="ordered" ${p.status==='ordered'?'selected':''}>Ordered</option><option value="arrived" ${p.status==='arrived'?'selected':''}>Arrived</option></select></div>
-    <div class="field full"><label>Tracking # / ETA</label><div class="inwrap"><input data-pt="track" data-i="${i}" value="${esc(p.track||'')}"><button type="button" class="btn sm danger" data-delpt="${i}">✕</button></div></div>
+  el.innerHTML = draft.parts.map((p,i)=>`<div class="litem pitem">
+    <div class="field f-pn"><label>Part #</label><input data-pt="pn" data-i="${i}" value="${esc(p.pn||'')}" autocapitalize="characters" spellcheck="false"></div>
+    <div class="field f-desc"><label>Description</label><input data-pt="desc" data-i="${i}" value="${esc(p.desc||'')}"></div>
+    <div class="field"><label>Qty</label><input type="number" min="1" inputmode="numeric" data-pt="qty" data-i="${i}" value="${esc(p.qty||1)}"></div>
+    <div class="field"><label>Unit price</label><input type="number" min="0" step="0.01" inputmode="decimal" data-pt="price" data-i="${i}" value="${esc(p.price??'')}"></div>
+    <div class="field f-status"><label>Status</label><select data-pt="status" data-i="${i}">${PART_STATUSES.map(s=>`<option value="${s.k}" ${p.status===s.k?'selected':''}>${s.label}</option>`).join('')}</select></div>
+    <div class="field f-track"><label>Tracking # / ETA</label><div class="inwrap"><input data-pt="track" data-i="${i}" value="${esc(p.track||'')}"><button type="button" class="btn sm danger" data-delpt="${i}" title="Remove part">✕</button></div></div>
+    <div class="ltot" data-ltot="${i}">${(+p.price||0)?('Line: '+esc(money(lineTotal(p)))):''}</div>
   </div>`).join('') || `<p class="hint">No parts added.</p>`;
-  el.querySelectorAll('[data-pt]').forEach(inp=>inp.oninput=()=>{ const i=+inp.dataset.i,k=inp.dataset.pt; draft.parts[i][k]= k==='qty'?(+inp.value||1):inp.value; });
-  el.querySelectorAll('[data-delpt]').forEach(b=>b.onclick=()=>{ draft.parts.splice(+b.dataset.delpt,1); renderParts(); });
+  el.querySelectorAll('[data-pt]').forEach(inp=>{
+    const ev = inp.tagName==='SELECT' ? 'onchange' : 'oninput';
+    inp[ev]=()=>{ const i=+inp.dataset.i,k=inp.dataset.pt, p=draft.parts[i];
+      p[k] = k==='qty' ? (+inp.value||1) : k==='price' ? (inp.value===''?'':(+inp.value||0)) : inp.value;
+      if(k==='qty'||k==='price'){ const t=el.querySelector(`[data-ltot="${i}"]`); if(t) t.textContent=(+p.price||0)?('Line: '+money(lineTotal(p))):''; renderEstTotals(); }
+      if(k==='status') partStatusChanged(p.status);
+    };
+  });
+  el.querySelectorAll('[data-delpt]').forEach(b=>b.onclick=()=>{ draft.parts.splice(+b.dataset.delpt,1); renderParts(); renderEstTotals(); });
 }
-function renderEstParts(){
-  const el=$('#estPartList');
-  el.innerHTML = draft.estParts.map((p,i)=>`<div class="litem" style="grid-template-columns:2fr .6fr 1fr auto">
-    <div class="field"><label>Part / description</label><input data-ep="desc" data-i="${i}" value="${esc(p.desc)}"></div>
-    <div class="field"><label>Qty</label><input type="number" min="1" data-ep="qty" data-i="${i}" value="${esc(p.qty||1)}"></div>
-    <div class="field"><label>Unit price</label><input type="number" min="0" step="0.01" data-ep="price" data-i="${i}" value="${esc(p.price||0)}"></div>
-    <div class="field"><label>&nbsp;</label><button type="button" class="btn sm danger" data-delep="${i}">✕</button></div>
-  </div>`).join('') || `<p class="hint">No estimate parts.</p>`;
-  el.querySelectorAll('[data-ep]').forEach(inp=>inp.oninput=()=>{ const i=+inp.dataset.i,k=inp.dataset.ep; draft.estParts[i][k]= k==='desc'?inp.value:(+inp.value||0); renderEstTotals(); });
-  el.querySelectorAll('[data-delep]').forEach(b=>b.onclick=()=>{ draft.estParts.splice(+b.dataset.delep,1); renderEstParts(); renderEstTotals(); });
+/* a part's status moves the job along: Ordered → Parts ordered; every part Arrived → Parts arrived. Never moves a
+   Completed job, and only takes effect when the job is saved (it just sets the Status dropdown). */
+function partStatusChanged(st){
+  const sel=$('#f_status'); if(!sel || sel.value==='completed') return;
+  const live=draft.parts.filter(p=>(p.pn||p.desc||'').trim());
+  const list=live.length?live:draft.parts;
+  let target=null;
+  if(st==='arrived'){
+    const waiting=list.filter(p=>p.status!=='arrived').length;
+    if(!waiting) target='parts_arrived';
+    else { toast(waiting+' part'+(waiting>1?'s':'')+' still not in — status unchanged'); return; }
+  } else if(st==='ordered') target='parts_ordered';
+  else if(st==='to_order' && sel.value==='parts_arrived') target = list.some(p=>p.status==='ordered') ? 'parts_ordered' : 'parts_to_order';
+  if(target && sel.value!==target){ sel.value=target; toast('Job status → '+statusMeta(target).label+' (saves with the job)'); }
 }
 function renderTravel(){
   const el=$('#travelList');
@@ -796,24 +952,20 @@ function renderTravel(){
   el.querySelectorAll('[data-tv]').forEach(inp=>inp.oninput=()=>{ const i=+inp.dataset.i,k=inp.dataset.tv; draft.travel[i][k]= (k==='desc'||k==='date')?inp.value:(inp.value===''?'':(+inp.value||0)); renderTravelTotal(); });
   el.querySelectorAll('[data-deltv]').forEach(b=>b.onclick=()=>{ draft.travel.splice(+b.dataset.deltv,1); renderTravel(); renderTravelTotal(); });
 }
-function estTotals(){
-  const hours=+($('#f_estHours')?.value)||0;
-  const labour=hours*(+STATE.settings.labourRate||0);
-  const parts=draft.estParts.reduce((s,p)=>s+(+p.qty||0)*(+p.price||0),0);
-  const sub=labour+parts; const tax=sub*(+STATE.settings.taxRate||0)/100;
-  return {hours,labour,parts,sub,tax,total:sub+tax};
-}
 function renderEstTotals(){
-  const t=estTotals();
+  const jf=readForm(STATE.jobs[editingId]||editBase||newJob());
+  const t=estimateOf(jf);
   $('#estTotals').innerHTML=`
     <div class="totrow"><span>Labour (${t.hours} hr @ ${money(STATE.settings.labourRate)})</span><span>${money(t.labour)}</span></div>
     <div class="totrow"><span>Parts</span><span>${money(t.parts)}</span></div>
+    ${t.wall?`<div class="totrow"><span>Wall mount</span><span>${money(t.wall)}</span></div>`:''}
+    ${travelIncluded(jf)?`<div class="totrow"><span>Travel</span><span>${money(t.travel)}</span></div>`:`<div class="totrow hint"><span>Travel (not on this estimate)</span><span>—</span></div>`}
     <div class="totrow"><span>Subtotal</span><span>${money(t.sub)}</span></div>
     <div class="totrow"><span>Tax (${STATE.settings.taxRate}%)</span><span>${money(t.tax)}</span></div>
     <div class="totrow big"><span>Estimate total</span><span>${money(t.total)}</span></div>`;
 }
 function travelTotal(){ return draft.travel.reduce((s,t)=> s + (t.amount!==''&&t.amount!=null ? (+t.amount||0) : (+t.km||0)*(+t.rate||0)), 0); }
-function renderTravelTotal(){ $('#travelTotal').innerHTML=`<div class="totrow big"><span>Expense claim total</span><span>${money(travelTotal())}</span></div>`; }
+function renderTravelTotal(){ $('#travelTotal').innerHTML=`<div class="totrow big"><span>Travel total</span><span>${money(travelTotal())}</span></div>`; if($('#estTotals')) renderEstTotals(); }
 
 /* read the form into a job object (does not persist) */
 function readForm(base){
@@ -825,9 +977,13 @@ function readForm(base){
   j.customer=g('f_customer').trim(); j.phone=g('f_phone').trim(); j.address=g('f_address').trim(); j.email=g('f_email').trim();
   j.model=g('f_model').trim(); j.serial=g('f_serial').trim(); j.warranty=g('f_warranty').trim(); j.productNote=g('f_productNote').trim();
   j.issue=g('f_issue').trim();
-  j.estLabourHours=g('f_estHours'); j.estNotes=g('f_estNotes').trim();
+  j.estLabourHours=g('f_estHours'); j.estNotes=g('f_estNotes').trim(); j.estInternal=g('f_estInternal').trim();
+  j.wallMount=g('f_wallMount'); j.invoiceNo=g('f_invoiceNo').trim();
+  const te=$('#f_travelOnEst'); if(te) j.travelOnEstimate=te.checked;
+  j.paid=!!g('f_paid'); j.paidAmount=g('f_paidAmount'); j.paidDate=g('f_paidDate'); j.paidMethod=g('f_paidMethod');
   j.diagnosis=g('f_diagnosis').trim(); j.repairNotes=g('f_repairNotes').trim(); j.closedDate=g('f_closedDate');
-  j.appts=draft.appts; j.parts=draft.parts; j.estParts=draft.estParts; j.travel=draft.travel;
+  // parts + old quote lines are now one list: saving folds the legacy estParts into parts
+  j.appts=draft.appts; j.parts=draft.parts; j.estParts=[]; j.travel=draft.travel;
   j.lat=draft.lat; j.lng=draft.lng;
   return j;
 }
@@ -844,6 +1000,7 @@ function saveJobFromForm(){
   } else j=form;   // new job — or one deleted on another device meanwhile: save the whole form back
   // auto-advance New -> Scheduled when a confirmed appointment exists
   if(j.status==='new' && (j.appts||[]).some(a=>a.confirmed)) j.status='scheduled';
+  if(!j.invoiceNo){ if(editingIsNew && !j.createdAt) j.createdAt=Date.now(); const inv=genInvoice(j); if(inv) j.invoiceNo=inv; }
   j.updatedAt=Date.now();
   if(!Array.isArray(j.log)) j.log=[];
   if(editingIsNew){ j.createdAt=Date.now(); logEvent(j,'Job created'); }
@@ -855,11 +1012,13 @@ function saveJobFromForm(){
 
 /* ===================== quote / expense text ===================== */
 function buildQuoteText(j){
-  const t=estTotals();
+  // built from the job only — internal notes (estInternal) and travel detail never go on the customer's quote
+  const t=estimateOf(j), inv=invoiceFor(j);
   const L=[];
   L.push('QUOTATION — Sony TV Repair');
   if(STATE.settings.tech) L.push('Technician: '+STATE.settings.tech);
   L.push('Date: '+fmtDate(todayISO()));
+  if(inv) L.push('Invoice #: '+inv);
   L.push('');
   if(j.customer) L.push('Customer: '+j.customer);
   if(j.model||j.serial) L.push('Unit: '+[j.model,j.serial].filter(Boolean).join(' · '));
@@ -867,7 +1026,10 @@ function buildQuoteText(j){
   L.push('');
   if(j.issue){ L.push('Reported issue:'); L.push('  '+j.issue); L.push(''); }
   L.push('Labour: '+t.hours+' hr @ '+money(STATE.settings.labourRate)+' = '+money(t.labour));
-  if(j.estParts.length){ L.push('Parts:'); j.estParts.forEach(p=>L.push('  - '+(p.desc||'part')+'  x'+(p.qty||1)+' @ '+money(p.price)+' = '+money((+p.qty||0)*(+p.price||0)))); }
+  const priced=mergedParts(j).filter(p=>(+p.price||0) && (p.pn||p.desc));
+  if(priced.length){ L.push('Parts:'); priced.forEach(p=>L.push('  - '+(p.desc||'part')+(p.pn?' ('+p.pn+')':'')+'  x'+(p.qty||1)+' @ '+money(p.price)+' = '+money(lineTotal(p)))); }
+  if(t.wall) L.push('Wall mount: '+money(t.wall));
+  if(t.travel) L.push('Travel: '+money(t.travel));
   L.push('');
   L.push('Subtotal: '+money(t.sub));
   L.push('Tax ('+STATE.settings.taxRate+'%): '+money(t.tax));
@@ -888,10 +1050,9 @@ function buildExpenseText(j){
     L.push(fmtDate(t.date)+' | '+(t.desc||'travel')+' | '+detail+' | '+money(amt));
   });
   L.push('');
-  L.push('TOTAL CLAIM: '+money(travelTotal.call?travelTotalFor(j):0));
+  L.push('TOTAL CLAIM: '+money(travelTotalFor(j)));
   return L.join('\n');
 }
-function travelTotalFor(j){ return (j.travel||[]).reduce((s,t)=> s + (t.amount!==''&&t.amount!=null?(+t.amount||0):(+t.km||0)*(+t.rate||0)),0); }
 
 /* ===================== calendar (.ics / gcal) ===================== */
 function apptDates(a){
@@ -928,19 +1089,29 @@ function gcalLink(a,j){
 
 /* ===================== geocoding ===================== */
 async function geocode(q){
-  const url='https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(q);
+  const url='https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ca&q='+encodeURIComponent(q);
   const r=await fetch(url,{headers:{'Accept':'application/json'}});
   if(!r.ok) throw new Error('geocode http '+r.status);
   const a=await r.json();
   if(!a.length) return null;
   return {lat:parseFloat(a[0].lat), lng:parseFloat(a[0].lon)};
 }
+/* try the address without its unit #, then without the postal code, then as typed (≈1 req/sec for Nominatim) */
+async function geocodeSmart(addr){
+  const tries=geocodeCandidates(addr);
+  for(let i=0;i<tries.length;i++){
+    if(i) await new Promise(r=>setTimeout(r,1100));
+    const g=await geocode(tries[i]);
+    if(g) return g;
+  }
+  return null;
+}
 async function geocodeEditor(j){
   const addr=$('#f_address').value.trim();
   if(!addr){ toast('Enter an address first'); return; }
   const btn=$('#f_geocode'); btn.textContent='…'; btn.disabled=true;
   try{
-    const g=await geocode(addr);
+    const g=await geocodeSmart(addr);
     if(g){ draft.lat=g.lat; draft.lng=g.lng; $('#f_latlng').value=g.lat.toFixed(5)+', '+g.lng.toFixed(5); toast('Location found'); }
     else toast('Address not found — try adding city/province');
   }catch(e){ console.warn(e); toast('Geocoding failed (offline?)'); }
@@ -952,7 +1123,7 @@ async function geocodeMissing(){
   toast('Placing '+todo.length+' pin(s)…');
   for(const t of todo){
     try{
-      const g=await geocode(t.addr);
+      const g=await geocodeSmart(t.addr);
       // re-resolve after the await: a cloud snapshot may have replaced the job object (or changed/deleted it)
       const j=STATE.jobs[t.id];
       if(g && j && j.address===t.addr && (j.lat==null||j.lng==null)){ j.lat=g.lat; j.lng=g.lng; persist(); }
@@ -983,7 +1154,9 @@ function refreshMapMarkers(){
     if(j.lat==null||j.lng==null) return;
     if(q && !matchJob(j,q) && !statusMeta(j.status).label.toLowerCase().includes(q)) return;
     const m=L.marker([j.lat,j.lng],{icon:pinIcon(j.status),draggable:true}).addTo(map);
-    m.bindPopup(`<b>${esc(j.customer||'(no name)')}</b><br>${esc(statusMeta(j.status).label)}<br>${esc(j.address||'')}<br><a href="#" onclick="openJob('${j.id}');return false;">Open job →</a>`);
+    const gq=gmapsQuery(j);
+    m.bindPopup(`<b>${esc(j.customer||'(no name)')}</b><br>${esc(statusMeta(j.status).label)}<br>${esc(j.address||'')}<br><a href="#" onclick="openJob('${j.id}');return false;">Open job →</a>`
+      +(gq?`<br><a href="${esc(gmapsDir(gq))}" target="_blank" rel="noopener">🧭 Directions</a> · <a href="${esc(gmapsSearch(gq))}" target="_blank" rel="noopener">Google Maps</a>`:''));
     m.on('dragend',ev=>{ const p=ev.target.getLatLng(), cur=STATE.jobs[j.id]; if(!cur) return; cur.lat=p.lat; cur.lng=p.lng; persist(); toast('Pin moved'); });
     markers[j.id]=m; pts.push([j.lat,j.lng]);
   });
@@ -1016,6 +1189,7 @@ function renderAgenda(){
           <button class="btn sm" data-openjob="${j.id}">Open job</button>
           <button class="btn sm ghost" data-agics="${j.id}:${a.id}">📅 .ics</button>
           <button class="btn sm ghost" data-aggcal="${j.id}:${a.id}">Google</button>
+          ${gmapsQuery(j)?`<a class="btn sm ghost" href="${esc(gmapsDir(gmapsQuery(j)))}" target="_blank" rel="noopener">🧭 Directions</a>`:''}
         </div>
       </div>
     </div>`;
@@ -1114,7 +1288,7 @@ function showParsePreview(o){
     toast('Job created'); openJob(j.id);
     if(j.address){
       const id=j.id, addr=j.address;
-      geocode(addr).then(gg=>{
+      geocodeSmart(addr).then(gg=>{
         const cur=STATE.jobs[id];   // re-resolve: a cloud snapshot may have replaced the object meanwhile
         if(gg && cur && cur.address===addr && cur.lat==null){ cur.lat=gg.lat; cur.lng=gg.lng; persist(); refreshMapMarkers(); }
       }).catch(()=>{});
@@ -1124,21 +1298,17 @@ function showParsePreview(o){
 
 /* ===================== EXPORT ===================== */
 function exportCSV(){
-  const cols=['Service Job ID','Service Order #','Case #','Status','Customer','Phone','Email','Address','Model','Serial','Issue','Received','Next appt','Estimate total','Travel total'];
+  const cols=['Invoice #','Service Job ID','Service Order #','Case #','Status','Customer','Phone','Email','Address','Model','Serial','Issue','Received','Next appt','Wall mount','Estimate total','Travel total','Travel on estimate','Paid','Paid amount','Paid date','Paid method'];
   const rows=jobsArr().map(j=>{
     const t=jobEstimateTotal(j); const na=upcomingApptOf(j);
-    return [j.jobId,j.serviceOrder,j.caseNo,statusMeta(j.status).label,j.customer,j.phone,j.email,j.address,j.model,j.serial,
-      (j.issue||'').replace(/\s+/g,' '), j.received, na?(fmtDate(na.date)+' '+fmt12(na.time)):'', t.toFixed(2), travelTotalFor(j).toFixed(2)];
+    return [invoiceFor(j),j.jobId,j.serviceOrder,j.caseNo,statusMeta(j.status).label,j.customer,j.phone,j.email,j.address,j.model,j.serial,
+      (j.issue||'').replace(/\s+/g,' '), j.received, na?(fmtDate(na.date)+' '+fmt12(na.time)):'', j.wallMount?(+j.wallMount).toFixed(2):'', t.toFixed(2), travelTotalFor(j).toFixed(2),
+      travelIncluded(j)?'Yes':'No', j.paid?'Yes':'No', j.paidAmount??'', j.paidDate||'', j.paidMethod||''];
   });
   const csv=[cols,...rows].map(r=>r.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(',')).join('\r\n');
   const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a');
   a.href=url; a.download='repair-desk-jobs.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
   toast('CSV exported');
-}
-function jobEstimateTotal(j){
-  const labour=(+j.estLabourHours||0)*(+STATE.settings.labourRate||0);
-  const parts=(j.estParts||[]).reduce((s,p)=>s+(+p.qty||0)*(+p.price||0),0);
-  const sub=labour+parts; return sub+sub*(+STATE.settings.taxRate||0)/100;
 }
 function backupJson(){
   const blob=new Blob([JSON.stringify(STATE,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob);
@@ -1317,7 +1487,8 @@ function boot(){
   // intake
   $('#parseBtn').onclick=()=>{ const t=$('#intakeText').value.trim(); if(!t){ toast('Paste a message first'); return; } showParsePreview(parseIntake(t)); };
   // job list clicks
-  $('#jobList').onclick=e=>{ const c=e.target.closest('[data-open]'); if(c) openJob(c.dataset.open); };
+  $('#jobList').onclick=e=>{ if(e.target.closest('[data-stop]')) return;   // phone / directions links work on their own
+    const c=e.target.closest('[data-open]'); if(c) openJob(c.dataset.open); };
   $('#jobSearch').oninput=renderJobs;
   $('#statusChips').onclick=e=>{ const c=e.target.closest('[data-status]'); if(c){ activeStatus=c.dataset.status; renderJobs(); } };
   // job editor
