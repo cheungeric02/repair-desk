@@ -207,7 +207,7 @@ main{padding:14px 16px 90px;max-width:1200px;margin:0 auto}
   <p class="hint" id="lockErr" style="color:var(--bad);min-height:16px"></p>
   <div id="lockWait" class="hide" style="display:flex;flex-direction:column;gap:8px">
     <button class="btn pri" id="lockRetry" style="width:100%;justify-content:center">Retry</button>
-    <button class="btn" id="lockOffline" style="width:100%;justify-content:center">View offline copy</button>
+    <button class="btn" id="lockOffline" style="width:100%;justify-content:center">Open offline copy</button>
   </div>
 </div></div>
 
@@ -348,13 +348,37 @@ main{padding:14px 16px 90px;max-width:1200px;margin:0 auto}
 <div id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin=""></script>
+<!-- ===================== Secured Firebase config (dedicated project; email/password auth) =====================
+     Read by the app logic (to know it is in cloud mode even when offline) and by the Firebase module at the bottom.
+     Until a real apiKey is present, the app runs 100% local (no cloud, local passcode gate). -->
+<script>
+/* === FIREBASE_CONFIG_START === repair-desk-3bc6a (dedicated project, email/password auth) === */
+window.RD_FB_CONFIG = {
+  apiKey: "AIzaSyBrSBEyAYC5fksywLUvfhUYvtd1DF-srHc",
+  authDomain: "repair-desk-3bc6a.firebaseapp.com",
+  databaseURL: "https://repair-desk-3bc6a-default-rtdb.firebaseio.com",
+  projectId: "repair-desk-3bc6a",
+  storageBucket: "repair-desk-3bc6a.firebasestorage.app",
+  messagingSenderId: "666491861373",
+  appId: "1:666491861373:web:71d1c2c6f1df6da8d97414"
+};
+/* === FIREBASE_CONFIG_END === */
+</script>
 <script>
 /* ===================== Repair Desk — app logic ===================== */
-const APP_VERSION = 2;   // MUST equal the cache number in sw.js (rd-shell-vN)
-const LS = { data:'repairdesk_data', theme:'repairdesk_theme', admin:'repairdesk_admin', seen:'repairdesk_lastSeenVer' };
-let SYNC_ENABLED = false;   // flipped on by the Firebase module once a secured project is configured AND the user is signed in
+const APP_VERSION = 3;   // MUST equal the cache number in sw.js (rd-shell-vN)
+const LS = { data:'repairdesk_data', theme:'repairdesk_theme', admin:'repairdesk_admin', seen:'repairdesk_lastSeenVer',
+             outbox:'repairdesk_outbox', signedIn:'repairdesk_signedIn' };
 
 const PATCH_NOTES = [
+  { v:3, date:'2026-11-21', title:'Works with no signal', notes:[
+    'No signal? Keep working — changes are saved on this phone and sync by themselves when you’re back online (the pill at the top shows how many are waiting).',
+    'Two devices can now edit at the same time: only the fields you actually changed are sent, so the phone and the desktop no longer overwrite each other.',
+    'Opens straight to your jobs when you’re already signed in — no sign-in screen flash.',
+    'A shared text is kept until you create the job (or close it), so Retry or a reload no longer loses it.',
+    'Better text parsing: keeps the warranty, understands “Name - …” and “Cust:”, keeps a second phone number in the notes, and no longer mistakes part of a long serial for a phone number.',
+    'Faster start on a weak signal, and no longer clears the offline copies of your other apps.'
+  ]},
   { v:2, date:'2026-11-21', title:'Share texts straight in', notes:[
     'Install Repair Desk on your phone (Chrome ⋮ → Install app), then long-press a text in Messages → Share → Repair Desk to start a new job with the details filled in.',
     'Smarter parsing: handles a whole request on one line, and text after the serial number becomes the reported issue.',
@@ -425,23 +449,104 @@ function newJob(seed={}){
 }
 function jobsArr(){ return Object.values(STATE.jobs); }
 
-/* ---- persistence ---- */
+/* ---- persistence ----
+   Local copy in localStorage always. In cloud mode every save is turned into a PATCH of only the fields that
+   changed (jobs/<id>/<field>, settings/<key>) and sent with a multi-path update(), so two devices editing at the
+   same time don't overwrite each other. Each patch also goes into a durable outbox (localStorage) until the
+   server confirms it; whatever is still in the outbox is re-applied on top of the first cloud snapshot after the
+   next launch — so edits made with no signal are never lost. */
+let SYNCED = { jobs:{}, settings:{} };   // canonical field values last known to match the cloud
+let CONN = false, SYNC_ERR = '';         // live connection (Firebase .info/connected) / last sync error
+function canon(v){   // order-independent JSON; null / missing / '' / empty []/{} all compare equal (Firebase drops the empties)
+  if(v==null || v==='') return undefined;
+  const s=JSON.stringify(v, (k,x)=> (x && typeof x==='object' && !Array.isArray(x))
+    ? Object.keys(x).sort().reduce((o,kk)=>{ if(x[kk]!=null) o[kk]=x[kk]; return o; },{}) : x);
+  return (s==='[]'||s==='{}') ? undefined : s;
+}
+const clean = v => v==null ? null : JSON.parse(JSON.stringify(v));   // strips undefined (Firebase rejects it)
+function snapshotOf(st){
+  const s={ jobs:{}, settings:{} };
+  for(const [id,j] of Object.entries(st.jobs||{})){ const f={}; for(const k of Object.keys(j)){ const c=canon(j[k]); if(c!==undefined) f[k]=c; } s.jobs[id]=f; }
+  for(const k of Object.keys(st.settings||{})){ const c=canon(st.settings[k]); if(c!==undefined) s.settings[k]=c; }
+  return s;
+}
+/* fields of STATE that differ from SYNCED, as a Firebase multi-path patch; also advances SYNCED */
+function diffPatch(){
+  const p={}, next=snapshotOf(STATE), prev=SYNCED;
+  for(const [id,f] of Object.entries(next.jobs)){
+    const b=prev.jobs[id];
+    if(!b){ p['jobs/'+id]=clean(STATE.jobs[id]); continue; }
+    for(const k of new Set([...Object.keys(f),...Object.keys(b)])) if(f[k]!==b[k]) p['jobs/'+id+'/'+k]=clean(STATE.jobs[id][k]);
+  }
+  for(const id of Object.keys(prev.jobs)) if(!next.jobs[id]) p['jobs/'+id]=null;
+  for(const k of new Set([...Object.keys(next.settings),...Object.keys(prev.settings)])) if(next.settings[k]!==prev.settings[k]) p['settings/'+k]=clean(STATE.settings[k]);
+  SYNCED=next;
+  return p;
+}
+function outboxRead(){ try{ const a=JSON.parse(localStorage.getItem(LS.outbox)||'[]'); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
+function outboxWrite(a){ try{ if(a.length) localStorage.setItem(LS.outbox, JSON.stringify(a)); else localStorage.removeItem(LS.outbox); }catch(e){ console.warn('outbox',e); } }
+function sendEntry(entry){
+  if(!window.__fbWrite) return;
+  window.__fbWrite(entry.patch).then(()=>{
+    outboxWrite(outboxRead().filter(x=>x.seq!==entry.seq));
+    if(SYNC_ERR){ SYNC_ERR=''; }
+    updatePill();
+  }).catch(e=>{ console.warn('fb write',e); SYNC_ERR=(e&&e.code)||'write failed'; updatePill(); });
+}
+let queuedNoted=false;
 function persist(){
-  // Cloud mode: never write before the first cloud snapshot has loaded — a stale local copy would
-  // overwrite every other device's changes (the whole blob is replaced on each write).
-  if(window.__fbConfigured && !window.__cloudReady){ toast('Not saved — no connection to the cloud yet. Reconnect, then try again.'); return; }
   STATE.savedAt=Date.now();
   try{ localStorage.setItem(LS.data, JSON.stringify(STATE)); }catch(e){ console.warn('save',e); }
-  if(SYNC_ENABLED && window.__fbWrite) window.__fbWrite(STATE);
+  if(!fbMode()) return;
+  const patch=diffPatch();
+  if(!Object.keys(patch).length) return;
+  patch.savedAt=STATE.savedAt;
+  const entry={ seq: Date.now()+'-'+Math.random().toString(36).slice(2,7), patch };
+  const box=outboxRead(); box.push(entry); outboxWrite(box);
+  if(window.__cloudReady && window.__fbAuth==='in') sendEntry(entry);
+  else if(!queuedNoted && !CONN){ queuedNoted=true; toast('Saved on this phone — it will sync when you’re back online'); }
+  updatePill();
 }
+/* apply one patch path ("jobs/<id>/<field>" | "jobs/<id>" | "settings/<k>") to STATE */
+function applyPath(path,val){
+  const parts=path.split('/'); let o=STATE;
+  for(let i=0;i<parts.length-1;i++){ const k=parts[i]; if(!o[k]||typeof o[k]!=='object') o[k]={}; o=o[k]; }
+  const last=parts[parts.length-1];
+  if(val==null) delete o[last]; else o[last]=JSON.parse(JSON.stringify(val));
+}
+/* after the first cloud snapshot: put back anything that never reached the server, then send it */
+function replayOutbox(){
+  const box=outboxRead(); if(!box.length) return;
+  const kept=[];
+  for(const e of box){
+    const patch={};
+    for(const [p,v] of Object.entries(e.patch||{})){
+      const parts=p.split('/');
+      // a field edit for a job that was deleted on another device: drop it rather than resurrect a half-empty job
+      if(parts[0]==='jobs' && parts.length>2 && !STATE.jobs[parts[1]]) continue;
+      if(parts[0]==='jobs' || parts[0]==='settings') applyPath(p,v);
+      patch[p]=v;
+    }
+    if(Object.keys(patch).some(k=>k!=='savedAt')) kept.push({ seq:e.seq, patch });
+  }
+  outboxWrite(kept);
+  normalize(); SYNCED=snapshotOf(STATE);
+  try{ localStorage.setItem(LS.data, JSON.stringify(STATE)); }catch(e){}
+  renderAll();
+  kept.forEach(sendEntry);
+}
+function renderAll(){ renderJobs(); renderAgenda(); refreshMapMarkers(); }
 function loadLocal(){
   try{
     const raw=localStorage.getItem(LS.data);
     if(raw){ const d=JSON.parse(raw); STATE.jobs=d.jobs||{}; STATE.settings=Object.assign({...DEFAULT_SETTINGS}, d.settings||{}); }
   }catch(e){ console.warn('load',e); }
   normalize();
+  SYNCED=snapshotOf(STATE);   // baseline until the cloud answers; edits from here are patched against it
 }
 function normalize(){
+  if(!STATE.jobs || typeof STATE.jobs!=='object' || Array.isArray(STATE.jobs)) STATE.jobs={};
+  for(const [id,j] of Object.entries(STATE.jobs)){ if(!j||typeof j!=='object'){ delete STATE.jobs[id]; continue; } j.id=id; }
   Object.values(STATE.jobs).forEach(j=>{
     j.appts=Array.isArray(j.appts)?j.appts:[];
     j.parts=Array.isArray(j.parts)?j.parts:[];
@@ -513,10 +618,12 @@ function upcomingApptOf(j){
 }
 
 /* ===================== JOB EDITOR ===================== */
+let editBase=null, editingIsNew=false;   // the job as it was when the editor opened (for a 3-way merge on save)
 function openJob(id){
   const j = id ? STATE.jobs[id] : newJob();
-  editingId=j.id;
-  if(!id){ /* don't add until saved */ }
+  if(!j){ toast('That job no longer exists'); return; }
+  editingId=j.id; editingIsNew=!id;   // a new job isn't added until saved
+  editBase=JSON.parse(JSON.stringify(j));
   $('#jobTitle').textContent = id ? (j.customer||'Edit job') : 'New job';
   $('#deleteJob').style.display = id ? '' : 'none';
   $('#jobBody').innerHTML = jobForm(j);
@@ -725,18 +832,25 @@ function readForm(base){
   return j;
 }
 function saveJobFromForm(){
+  const form=readForm(editBase);
   const existing=STATE.jobs[editingId];
-  const base=existing||newJob({id:editingId});
-  const j=readForm(base);
+  let j;
+  if(existing && !editingIsNew){
+    // 3-way merge: only fields changed in this editor overwrite the current job, so a change that arrived from
+    // another device while the editor was open (e.g. a status or appointment) isn't silently reverted.
+    j=JSON.parse(JSON.stringify(existing));
+    for(const k of Object.keys(form)) if(canon(form[k])!==canon(editBase[k])) j[k]=form[k];
+    j.id=editingId;
+  } else j=form;   // new job — or one deleted on another device meanwhile: save the whole form back
   // auto-advance New -> Scheduled when a confirmed appointment exists
-  if(j.status==='new' && j.appts.some(a=>a.confirmed)) j.status='scheduled';
+  if(j.status==='new' && (j.appts||[]).some(a=>a.confirmed)) j.status='scheduled';
   j.updatedAt=Date.now();
-  const isNew=!existing;
-  if(isNew){ j.createdAt=Date.now(); logEvent(j,'Job created'); }
-  else logEvent(j,'Job updated');
+  if(!Array.isArray(j.log)) j.log=[];
+  if(editingIsNew){ j.createdAt=Date.now(); logEvent(j,'Job created'); }
+  else logEvent(j, existing ? 'Job updated' : 'Job saved again after it was deleted on another device');
   STATE.jobs[j.id]=j;
-  persist(); closeOverlay('#jobOverlay'); renderJobs(); refreshMapMarkers(); renderAgenda();
-  toast(isNew?'Job created':'Job saved');
+  persist(); closeOverlay('#jobOverlay'); renderAll();
+  toast(editingIsNew?'Job created':'Job saved');
 }
 
 /* ===================== quote / expense text ===================== */
@@ -833,11 +947,16 @@ async function geocodeEditor(j){
   btn.textContent='📍 Locate'; btn.disabled=false;
 }
 async function geocodeMissing(){
-  const todo=jobsArr().filter(j=>j.address && (j.lat==null||j.lng==null));
+  const todo=jobsArr().filter(j=>j.address && (j.lat==null||j.lng==null)).map(j=>({id:j.id, addr:j.address}));
   if(!todo.length){ toast('All addresses already placed'); return; }
   toast('Placing '+todo.length+' pin(s)…');
-  for(const j of todo){
-    try{ const g=await geocode(j.address); if(g){ j.lat=g.lat; j.lng=g.lng; persist(); } }catch(e){ console.warn('geo',e); }
+  for(const t of todo){
+    try{
+      const g=await geocode(t.addr);
+      // re-resolve after the await: a cloud snapshot may have replaced the job object (or changed/deleted it)
+      const j=STATE.jobs[t.id];
+      if(g && j && j.address===t.addr && (j.lat==null||j.lng==null)){ j.lat=g.lat; j.lng=g.lng; persist(); }
+    }catch(e){ console.warn('geo',e); }
     await new Promise(r=>setTimeout(r,1100)); // respect Nominatim ~1 req/sec
   }
   refreshMapMarkers(); renderJobs(); toast('Done placing pins');
@@ -865,7 +984,7 @@ function refreshMapMarkers(){
     if(q && !matchJob(j,q) && !statusMeta(j.status).label.toLowerCase().includes(q)) return;
     const m=L.marker([j.lat,j.lng],{icon:pinIcon(j.status),draggable:true}).addTo(map);
     m.bindPopup(`<b>${esc(j.customer||'(no name)')}</b><br>${esc(statusMeta(j.status).label)}<br>${esc(j.address||'')}<br><a href="#" onclick="openJob('${j.id}');return false;">Open job →</a>`);
-    m.on('dragend',ev=>{ const p=ev.target.getLatLng(); j.lat=p.lat; j.lng=p.lng; persist(); toast('Pin moved'); });
+    m.on('dragend',ev=>{ const p=ev.target.getLatLng(), cur=STATE.jobs[j.id]; if(!cur) return; cur.lat=p.lat; cur.lng=p.lng; persist(); toast('Pin moved'); });
     markers[j.id]=m; pts.push([j.lat,j.lng]);
   });
   if(pts.length){ try{ map.fitBounds(pts,{padding:[40,40],maxZoom:13}); }catch(e){} }
@@ -907,50 +1026,62 @@ function renderAgenda(){
 }
 
 /* ===================== INTAKE PARSE ===================== */
-const PHONE_RE=/(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/;
+/* a NA phone number that isn't part of a longer run of digits (no lookbehind — older Safari lacks it) */
+const PHONE_RE=/(^|\D)((?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})(?!\d)/;
+function findPhone(s){ const m=String(s||'').match(PHONE_RE); return m ? {text:m[2], index:m.index+m[1].length} : null; }
 function fmtPhone(ph){ const dd=String(ph||'').replace(/\D/g,''); const d10=(dd.length===11&&dd[0]==='1')?dd.slice(1):dd; return d10.length===10?`(${d10.slice(0,3)}) ${d10.slice(3,6)}-${d10.slice(6)}`:String(ph||'').trim(); }
 /* Label → field. Order matters: longer labels first so "Service Order" beats "Order". */
 const INTAKE_LABELS=[
   ['serviceOrder','Service\\s*Order(?:\\s*(?:#|No\\.?|Number))?|S\\.?O\\.?(?:\\s*#)?|Order(?:\\s*(?:#|No\\.?|Number))?'],
   ['jobId','Service\\s*Job(?:\\s*(?:ID|#|No\\.?))?|Job(?:\\s*(?:ID|#|No\\.?|Number))?'],
   ['caseNo','Case(?:\\s*(?:#|No\\.?|Number))?'],
-  ['customer','Customer(?:\\s*Name)?|Client(?:\\s*Name)?|Full\\s*Name|Name'],
-  ['phone','Phone(?:\\s*(?:#|No\\.?|Number))?|Tel(?:ephone)?|Mobile|Cell(?:\\s*Phone)?'],
-  ['email','E-?mail(?:\\s*Address)?'],
-  ['address','Service\\s*Address|Address|Addr\\.?|Location'],
+  ['customer','Customer(?:\\s*Name)?|Cust\\.?(?:\\s*Name)?|Client(?:\\s*Name)?|Full\\s*Name|Name'],
+  ['phone','(?:(?:Alt(?:ernate)?|Other|Home|Work|Second(?:ary)?|2nd|Primary|Best)\\s+)?(?:Phone(?:\\s*(?:#|No\\.?|Number))?|Tel(?:ephone)?|Mobile|Cell(?:\\s*Phone)?)'],
+  ['email','(?:Alt(?:ernate)?\\s+)?E-?mail(?:\\s*Address)?'],
+  ['address','(?:(?:Service|Billing|Home|Mailing|Street)\\s*)?Address|Addr\\.?|Location'],
   ['model','Model(?:\\s*(?:#|No\\.?|Number))?'],
   ['serial','Serial(?:\\s*(?:#|No\\.?|Number))?|S\\/N|SN'],
   ['warranty','Warranty(?:\\s*Status)?'],
   ['issue','Issue|Problem|Fault|Symptoms?|Complaint|Concern|Description|Notes?']
 ];
 const SINGLE_TOKEN=new Set(['model','serial','serviceOrder','caseNo','jobId','email']);
+const LABEL_ALL=INTAKE_LABELS.map(x=>'(?:'+x[1]+')').join('|');
+// "Label:" / "Label=" anywhere → start a new line there, so a whole request typed on one line still splits cleanly
+const LABEL_SPLIT_RE=new RegExp('(^|[\\s,;|])('+LABEL_ALL+')\\s*[:=]','gi');
+// a labelled line: "Label: value", "Label = value", or (only at the start of a line) "Label - value"
+const LABEL_LINE_RES=INTAKE_LABELS.map(([k,re])=>[k,new RegExp('^\\s*(?:'+re+')\\s*(?:[:=]|[-\\u2013\\u2014](?=\\s))\\s*(.*)$','i')]);
+const EMAIL_RE=/[\w.+-]+@[\w-]+\.[\w.-]*\w/;
 function parseIntake(raw){
   let text=String(raw||'').replace(/\r/g,'');
-  const all=INTAKE_LABELS.map(x=>x[1]).join('|');
-  // put every "Label:" on its own line, so a whole request typed on one line still splits cleanly
-  text=text.replace(new RegExp('(^|[\\s,;|])('+all+')\\s*[:=]','gi'), (m,pre,l)=>'\n'+l+':');
-  const labelRes=INTAKE_LABELS.map(([k,re])=>[k,new RegExp('^\\s*(?:'+re+')\\s*:\\s*(.*)$','i')]);
+  text=text.replace(LABEL_SPLIT_RE, (m,pre,l)=>'\n'+l+':');
   const o={customer:'',phone:'',email:'',address:'',model:'',serial:'',serviceOrder:'',caseNo:'',jobId:'',warranty:'',issue:''};
-  const extra=[];   // unlabelled text + anything trailing a single-value field → reported issue
+  const issueParts=[], extra=[];   // labelled issue text, then unlabelled text + anything left over → reported issue
   for(const line of text.split('\n')){
-    if(!line.trim()) continue;
-    let hit=null;
-    for(const [k,re] of labelRes){ const m=line.match(re); if(m){ hit=[k,m[1].trim()]; break; } }
-    if(!hit){ extra.push(line.trim()); continue; }
-    let [k,v]=hit;
+    const t=line.trim(); if(!t) continue;
+    let k=null, v='';
+    for(const [kk,re] of LABEL_LINE_RES){ const m=t.match(re); if(m){ k=kk; v=m[1].trim(); break; } }
+    if(!k){ extra.push(t); continue; }
+    if(k==='issue'){ if(v) issueParts.push(v); continue; }
+    let rest='';
     if(k==='phone'){
-      const pm=v.match(PHONE_RE);
-      if(pm){ const rest=(v.slice(0,pm.index)+' '+v.slice(pm.index+pm[0].length)).trim(); if(rest) extra.push(rest); v=pm[0]; }
+      const p=findPhone(v);
+      if(!p){ extra.push(t); continue; }   // "Phone: call after 5" — keep it as a note, not as the number
+      rest=(v.slice(0,p.index)+' '+v.slice(p.index+p.text.length)).trim(); v=p.text;
     } else if(SINGLE_TOKEN.has(k)){
-      const parts=v.split(/\s+/); v=parts.shift()||''; if(parts.length) extra.push(parts.join(' '));
+      const parts=v.split(/\s+/); v=parts.shift()||''; rest=parts.join(' ');
     }
     v=v.replace(/^[\s,;.:-]+|[\s,;]+$/g,'');
-    if(k==='issue'){ if(v) extra.unshift(v); continue; }
-    if(!o[k]) o[k]=v;
+    if(!v){ if(rest) extra.push(rest); continue; }
+    if(o[k]){
+      const same = k==='phone' ? fmtPhone(o[k])===fmtPhone(v) : o[k].toLowerCase()===v.toLowerCase();
+      if(!same) extra.push(t);   // a second, different value (e.g. "Alt phone: …") → keep the whole line in the notes
+      continue;
+    }
+    o[k]=v; if(rest) extra.push(rest);
   }
-  let issue=extra.join(' ');
-  if(!o.email){ const em=issue.match(/[\w.+-]+@[\w-]+\.[\w.-]+/); if(em){ o.email=em[0]; issue=issue.replace(em[0],' '); } }
-  if(!o.phone){ const pm=issue.match(PHONE_RE); if(pm){ o.phone=pm[0]; issue=issue.replace(pm[0],' '); } }
+  let issue=[...issueParts, ...extra].join(' ');
+  if(!o.email){ const em=issue.match(EMAIL_RE); if(em){ o.email=em[0]; issue=issue.replace(em[0],' '); } }
+  if(!o.phone){ const p=findPhone(issue); if(p){ o.phone=p.text; issue=issue.slice(0,p.index)+' '+issue.slice(p.index+p.text.length); } }
   o.phone=fmtPhone(o.phone);
   o.issue=issue.replace(/\s+/g,' ').replace(/\s+([,;.])/g,'$1').replace(/^[\s,;.-]+/,'').trim();
   return o;
@@ -969,19 +1100,25 @@ function showParsePreview(o){
       ${row('serviceOrder','Service Order #',o.serviceOrder)}
       ${row('caseNo','Case #',o.caseNo)}
       ${row('jobId','Service Job ID',o.jobId)}
+      ${row('warranty','Warranty / purchase',o.warranty)}
     </div>
     <div class="field full" style="margin-top:10px"><label>Reported issue</label><textarea id="pp_issue">${esc(o.issue||'')}</textarea></div>
     <div style="display:flex;gap:8px;margin-top:12px"><button class="btn pri" id="createFromIntake">Create job →</button></div>`;
   $('#createFromIntake').onclick=()=>{
-    if(window.__fbConfigured && !window.__cloudReady){ toast('Can’t save yet — waiting for the cloud. Reconnect, then tap Create again.'); return; }
     const g=k=>{ const e=$('#pp_'+k); return e?e.value.trim():''; };
     const j=newJob({ customer:g('customer'),phone:g('phone'),address:g('address'),email:g('email'),
       model:g('model'),serial:g('serial'),serviceOrder:g('serviceOrder'),caseNo:g('caseNo'),jobId:g('jobId'),
-      issue:g('issue'), source: $('#intakeText').value.match(/@/)?'email':'sms' });
+      warranty:g('warranty'), issue:g('issue'), source: $('#intakeText').value.match(/@/)?'email':'sms' });
     logEvent(j,'Created from pasted '+(j.source));
-    STATE.jobs[j.id]=j; persist(); closeOverlay('#intakeOverlay'); renderJobs(); renderAgenda();
+    STATE.jobs[j.id]=j; persist(); closeOverlay('#intakeOverlay'); renderAll();   // closing the intake also clears a pending share
     toast('Job created'); openJob(j.id);
-    if(j.address){ geocode(j.address).then(gg=>{ if(gg){ j.lat=gg.lat; j.lng=gg.lng; persist(); refreshMapMarkers(); } }).catch(()=>{}); }
+    if(j.address){
+      const id=j.id, addr=j.address;
+      geocode(addr).then(gg=>{
+        const cur=STATE.jobs[id];   // re-resolve: a cloud snapshot may have replaced the object meanwhile
+        if(gg && cur && cur.address===addr && cur.lat==null){ cur.lat=gg.lat; cur.lng=gg.lng; persist(); refreshMapMarkers(); }
+      }).catch(()=>{});
+    }
   };
 }
 
@@ -1013,7 +1150,7 @@ function restoreJson(file){
   r.onload=()=>{ try{ const d=JSON.parse(r.result); if(!d.jobs){ toast('Not a valid backup'); return; }
     if(!confirm('Replace all current data with this backup?')) return;
     STATE.jobs=d.jobs||{}; STATE.settings=Object.assign({...DEFAULT_SETTINGS},d.settings||{}); normalize(); persist();
-    renderJobs(); renderAgenda(); refreshMapMarkers(); fillSettings(); toast('Backup restored');
+    renderAll(); fillSettings(); toast('Backup restored');
   }catch(e){ toast('Could not read file'); } };
   r.readAsText(file);
 }
@@ -1024,7 +1161,10 @@ async function hashPw(pw){
   catch(e){ let h=5381; for(const c of ('rd1:'+pw)) h=((h<<5)+h+c.charCodeAt(0))>>>0; return 'd:'+h; }
 }
 async function verifyPw(pw,hash){ return (await hashPw(pw))===hash; }
-function fbMode(){ return !!window.__fbConfigured; } // secured cloud sign-in vs local passcode
+/* Cloud mode comes from the static config (not from the Firebase module), so it is known even when the
+   module can't load — e.g. opening the app with no signal. */
+function fbMode(){ const c=window.RD_FB_CONFIG; return !!(c && c.apiKey && !/PASTE/.test(c.apiKey) && c.databaseURL && !/PASTE/.test(c.databaseURL)); }
+let SLOW=false;   // the sign-in service hasn't answered within ~8 s of launch (set in boot)
 function lockApp(){
   const fb=fbMode();
   $('#lockEmail').classList.toggle('hide', !fb);
@@ -1037,22 +1177,47 @@ function lockApp(){
   setTimeout(()=>{ (fb?$('#lockEmail'):$('#lockPw')).focus(); },50);
 }
 function unlockOK(){ try{ sessionStorage.setItem(LS.admin,'1'); }catch(e){} $('#lock').classList.remove('open'); }
-/* Signed in, waiting for the first cloud snapshot. stage: 'loading' | 'slow' | 'error' */
-let cloudWaitTimer=null;
-function showCloudWait(stage, detail){
+/* Cloud mode, sign-in state not known yet (Firebase restores it in the background): no form, so a signed-in
+   user never sees a sign-in flash. If nothing answers in ~8 s, offer Retry / the offline copy. */
+function showStarting(){
+  $('#lockEmail').classList.add('hide'); $('#lockPw').classList.add('hide'); $('#lockGo').classList.add('hide');
+  $('#lockTitle').textContent='Repair Desk'; $('#lockMsg').textContent='Starting…'; $('#lockErr').textContent='';
+  $('#lockWait').classList.add('hide'); $('#lock').classList.add('open');
+  if(SLOW) showStartFail();
+}
+function showStartFail(){
+  if(window.__fbAuth!==undefined || !$('#lock').classList.contains('open')) return;
+  let known=false; try{ known=localStorage.getItem(LS.signedIn)==='1'; }catch(e){}
   $('#lockEmail').classList.add('hide'); $('#lockPw').classList.add('hide'); $('#lockGo').classList.add('hide');
   $('#lockTitle').textContent='Repair Desk';
-  $('#lockMsg').textContent = stage==='loading' ? 'Loading your jobs…' : 'Can’t reach the cloud right now.';
-  $('#lockErr').textContent = stage==='error' ? (detail||'Sync error') : (stage==='slow' ? 'Check your signal, then retry.' : '');
-  $('#lockWait').classList.toggle('hide', stage==='loading');
-  $('#lock').classList.add('open');
-  clearTimeout(cloudWaitTimer);
-  if(stage==='loading') cloudWaitTimer=setTimeout(()=>{ if(!window.__cloudReady) showCloudWait('slow'); }, 12000);
+  $('#lockMsg').textContent='Can’t reach the sign-in service.';
+  $('#lockErr').textContent='Check your signal, then retry.';
+  $('#lockOffline').classList.toggle('hide', !known);   // only for a device that was signed in before
+  $('#lockWait').classList.remove('hide');
 }
 function fbLockState(){
-  if(window.__cloudReady) unlockOK();
-  else if(window.__fbAuth==='in') showCloudWait('loading');
-  else lockApp();
+  if(window.__fbAuth==='in') unlockOK();          // signed in: open now — jobs load / sync in the background
+  else if(window.__fbAuth==='out') lockApp();
+  else showStarting();
+}
+/* the header pill: Not signed in / Sync error / Offline · N to sync / Connecting… / Syncing… / Live · synced */
+function updatePill(){
+  const p=$('#syncPill'); if(!p) return;
+  const n=outboxRead().length, waiting=n?` · ${n} to sync`:'';
+  let cls='off', txt='Local only', dot='';
+  if(fbMode()){
+    const auth=window.__fbAuth;
+    if(auth==='out') txt='Not signed in';
+    else if(auth===undefined) { txt = SLOW ? 'Offline'+waiting : 'Connecting…'; if(SLOW) dot='var(--warn)'; }
+    else if(SYNC_ERR){ txt='Sync error'+waiting; dot='var(--bad)'; }
+    else if(!CONN){ if(window.__cloudReady||SLOW){ txt='Offline'+waiting; dot='var(--warn)'; } else txt='Connecting…'; }
+    else if(!window.__cloudReady) txt='Connecting…';
+    else if(n) txt='Syncing…'+waiting;
+    else { cls='on'; txt='Live · synced'; }
+  }
+  p.className='pill '+cls;
+  p.innerHTML=`<span class="dot"${dot?` style="background:${dot}"`:''}></span>${esc(txt)}`;
+  p.title = SYNC_ERR ? ('Sync error: '+SYNC_ERR) : (window.__fbUserEmail ? 'Signed in as '+window.__fbUserEmail : '');
 }
 async function tryUnlock(){
   if(fbMode()){
@@ -1068,14 +1233,16 @@ async function tryUnlock(){
   else { $('#lockErr').textContent='Wrong passcode'; $('#lockPw').select(); }
 }
 function maybeLock(){
-  if(fbMode()){ fbLockState(); return; }      // cloud mode: sign-in, then wait for the first cloud snapshot
+  if(fbMode()){ fbLockState(); return; }      // cloud mode: Firebase email/password sign-in
   if(!STATE.settings.pwHash) return;           // local mode, no passcode set
   let unlocked=false; try{ unlocked=sessionStorage.getItem(LS.admin)==='1'; }catch(e){}
   if(!unlocked) lockApp();
 }
 
 /* ===================== SETTINGS ===================== */
+let settingsDirty=false;   // the Settings boxes have unsaved typing
 function fillSettings(){
+  settingsDirty=false;
   const s=STATE.settings;
   $('#set_tech').value=s.tech||''; $('#set_cur').value=s.currency||'$';
   $('#set_labour').value=s.labourRate; $('#set_mileage').value=s.mileageRate; $('#set_tax').value=s.taxRate;
@@ -1085,7 +1252,7 @@ function saveSettings(){
   const s=STATE.settings;
   s.tech=$('#set_tech').value.trim(); s.currency=$('#set_cur').value.trim()||'$';
   s.labourRate=+$('#set_labour').value||0; s.mileageRate=+$('#set_mileage').value||0; s.taxRate=+$('#set_tax').value||0;
-  persist(); toast('Settings saved');
+  settingsDirty=false; persist(); toast('Settings saved');
 }
 async function savePw(){
   const a=$('#set_pw1').value, b=$('#set_pw2').value;
@@ -1112,7 +1279,7 @@ function checkWhatsNew(freshInstall){
 
 /* ===================== OVERLAY + TABS + WIRING ===================== */
 function openOverlay(sel){ $(sel).classList.add('open'); }
-function closeOverlay(sel){ $(sel).classList.remove('open'); }
+function closeOverlay(sel){ $(sel).classList.remove('open'); if(sel==='#intakeOverlay') clearShare(); }   // closing the intake discards a pending share
 function switchTab(tab){
   $$('#tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
   $$('.panel').forEach(p=>p.classList.toggle('active',p.id==='tab-'+tab));
@@ -1126,18 +1293,24 @@ function boot(){
   fillSettings();
   renderJobs(); renderAgenda(); renderPatchNotes();
 
-  // sync pill
-  $('#syncPill').className='pill '+(SYNC_ENABLED?'on':'off');
-  $('#syncPill').innerHTML=`<span class="dot"></span>${SYNC_ENABLED?'Live · synced':'Local only'}`;
+  // sync pill; if the sign-in service hasn't answered in ~8 s (no signal / Firebase didn't load), say so
+  updatePill();
+  if(fbMode()) setTimeout(()=>{ SLOW=true; updatePill(); showStartFail(); }, 8000);
 
   // tabs
   $$('#tabs button').forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
   // header
   $('#newBtn').onclick=$('#newBtn2').onclick=()=>openJob(null);
-  $('#intakeBtn').onclick=()=>{ $('#intakeText').value=''; $('#parsePreview').classList.add('hide'); $('#parsePreview').innerHTML=''; openOverlay('#intakeOverlay'); };
+  $('#intakeBtn').onclick=()=>{ clearShare(); $('#intakeText').value=''; $('#parsePreview').classList.add('hide'); $('#parsePreview').innerHTML=''; openOverlay('#intakeOverlay'); };
   $('#themeBtn').onclick=toggleTheme;
   $('#lockBtn').onclick=()=>{
-    if(fbMode()){ if(window.__fbSignOut) window.__fbSignOut(); try{sessionStorage.removeItem(LS.admin);}catch(e){} lockApp(); return; }
+    if(fbMode()){
+      try{sessionStorage.removeItem(LS.admin);}catch(e){}
+      if(window.__fbAuth==='in' && window.__fbSignOut){ window.__fbSignOut(); lockApp(); }
+      else if(window.__fbAuth===undefined) showStarting();   // offline copy: can't sign out without the sign-in service
+      else lockApp();
+      return;
+    }
     if(!STATE.settings.pwHash){ toast('Set a passcode in Settings first'); switchTab('settings'); return; }
     try{sessionStorage.removeItem(LS.admin);}catch(e){} lockApp();
   };
@@ -1168,10 +1341,12 @@ function boot(){
   $('#lockPw').onkeydown=e=>{ if(e.key==='Enter') tryUnlock(); };
   $('#lockEmail').onkeydown=e=>{ if(e.key==='Enter') tryUnlock(); };
   $('#lockRetry').onclick=()=>location.reload();
-  $('#lockOffline').onclick=()=>{ unlockOK(); toast('Offline copy — view only until you reconnect'); };
+  $('#lockOffline').onclick=()=>{ unlockOK(); toast('Offline — changes are saved on this phone and sync when you’re back online'); };
   // overlays: close buttons + click-outside
-  $$('[data-close]').forEach(b=>b.onclick=()=>b.closest('.overlay').classList.remove('open'));
-  $$('.overlay').forEach(o=>o.onclick=e=>{ if(e.target===o) o.classList.remove('open'); });
+  $$('[data-close]').forEach(b=>b.onclick=()=>closeOverlay('#'+b.closest('.overlay').id));
+  $$('.overlay').forEach(o=>o.onclick=e=>{ if(e.target===o) closeOverlay('#'+o.id); });
+  // settings typed but not saved yet: don't let a cloud update overwrite the boxes
+  $('#tab-settings').addEventListener('input', ()=>{ settingsDirty=true; });
 
   maybeLock();
   checkWhatsNew(fresh);
@@ -1181,23 +1356,37 @@ function boot(){
     navigator.serviceWorker.register('sw.js').catch(e=>console.warn('sw',e));
   }
   consumeShared();
+
+  booted=true; preBoot.splice(0).forEach(fn=>{ try{ fn(); }catch(e){ console.warn('bridge',e); } });
 }
 /* Opened via Android Share: sw.js stashed the text in the 'rd-share' cache and redirected to ?shared=1.
-   (POST + cache keeps the customer's details out of the URL and out of server logs.) */
+   (POST + cache keeps the customer's details out of the URL and out of server logs.)
+   The text stays in the cache until the job is created or the intake is closed, so a reload / Retry /
+   the app being killed in the background doesn't lose it. Checked on every launch; dropped after 24 h. */
+const SHARE_CACHE='rd-share';
+let pendingShareKey=null;
 async function consumeShared(){
-  if(!new URLSearchParams(location.search).has('shared')) return;
-  const key=new URL('__shared', location.href).href;
-  try{ history.replaceState(null,'',location.pathname); }catch(e){}
+  const viaShare=new URLSearchParams(location.search).has('shared');
+  if(viaShare){ try{ history.replaceState(null,'',location.pathname); }catch(e){} }
   let text='';
   try{
-    if('caches' in window){
-      const c=await caches.open('rd-share'); const r=await c.match(key);
-      if(r){ const d=await r.json(); text=d.text||''; }
-      await c.delete(key);
+    if('caches' in window && await caches.has(SHARE_CACHE)){
+      const key=new URL('__shared', location.href).href;
+      const c=await caches.open(SHARE_CACHE); const r=await c.match(key);
+      if(r){
+        let d={}; try{ d=await r.json(); }catch(e){}
+        if(d && String(d.text||'').trim() && Date.now()-(+d.at||0) < 864e5){ text=String(d.text); pendingShareKey=key; }
+        else await c.delete(key);
+      }
     }
   }catch(e){ console.warn('share',e); }
-  if(!text.trim()){ toast('Nothing came through from Share — try Paste instead'); return; }
+  if(!text){ if(viaShare) toast('Nothing came through from Share — try Paste instead'); return; }
   openIntakeWith(text);
+}
+function clearShare(){
+  const key=pendingShareKey; pendingShareKey=null;
+  if(!key || !('caches' in window)) return;
+  caches.open(SHARE_CACHE).then(c=>c.delete(key)).catch(()=>{});
 }
 function openIntakeWith(text){
   $('#intakeText').value=text;
@@ -1211,97 +1400,85 @@ function toggleTheme(){
   if(map) setTimeout(()=>map.invalidateSize(),50);
 }
 
-/* ---- bridge to the Firebase module (below). Active only once signed in. ---- */
-window.__getState = () => STATE;
-// newest-wins: only apply remote if it's newer than what we have (avoids clobbering a local edit mid-save)
-window.__applyRemote = val => {
-  if(!val) return;
-  try{
-    if((val.savedAt||0) < (STATE.savedAt||0)) return; // our local copy is newer
-    STATE.jobs = val.jobs||{}; STATE.settings = Object.assign({...DEFAULT_SETTINGS}, val.settings||{}); STATE.savedAt = val.savedAt||Date.now();
-    try{ localStorage.setItem(LS.data, JSON.stringify(STATE)); }catch(e){}
-    normalize(); renderJobs(); renderAgenda(); refreshMapMarkers(); fillSettings();
-  }catch(e){ console.warn('applyRemote',e); }
-};
-window.__setSync = s => {
-  const p=$('#syncPill'); if(!p) return;
-  if(s==='on'){ p.className='pill on'; p.innerHTML='<span class="dot"></span>Live · synced'; }
-  else if(s==='err'){ p.className='pill off'; p.innerHTML='<span class="dot" style="background:var(--bad)"></span>Sync error'; }
-  else { p.className='pill off'; p.innerHTML='<span class="dot"></span>Local only'; }
-};
+/* ---- bridge to the Firebase module (below). Calls that arrive before boot() (the module can run first)
+   are queued and run right after boot, so they always see the local copy already loaded. ---- */
+let booted=false; const preBoot=[];
+function whenBooted(fn){ if(booted) fn(); else preBoot.push(fn); }
+// every cloud snapshot is the truth: Firebase's local view already includes our own pending writes
+window.__applyRemote = val => whenBooted(()=>{
+  if(!val || typeof val!=='object') return;
+  STATE.jobs = val.jobs||{}; STATE.settings = Object.assign({...DEFAULT_SETTINGS}, val.settings||{});
+  STATE.savedAt = val.savedAt||STATE.savedAt;
+  normalize(); SYNCED=snapshotOf(STATE);
+  try{ localStorage.setItem(LS.data, JSON.stringify(STATE)); }catch(e){}
+  renderAll();
+  if(!settingsDirty && !$('#tab-settings').contains(document.activeElement)) fillSettings();
+});
+// first snapshot after sign-in: seed an empty cloud from this device, otherwise re-apply + send the outbox
+window.__onCloudReady = empty => whenBooted(()=>{
+  window.__cloudReady=true;
+  if(empty){ outboxWrite([]); SYNCED={ jobs:{}, settings:{} }; persist(); }   // whole local copy goes up as the patch
+  else replayOutbox();
+  updatePill();
+});
 window.__onSignedIn = user => {
-  SYNC_ENABLED=true; window.__fbAuth='in';
-  const p=$('#syncPill'); if(p) p.title = user&&user.email ? ('Signed in as '+user.email) : '';
-  if(document.readyState!=='loading') fbLockState();   // before boot, boot's maybeLock handles it
+  window.__fbAuth='in'; window.__fbUserEmail=(user&&user.email)||''; SYNC_ERR='';
+  try{ localStorage.setItem(LS.signedIn,'1'); }catch(e){}
+  whenBooted(()=>{ fbLockState(); updatePill(); });
 };
-// first cloud snapshot has been applied (or the empty cloud was seeded) — safe to edit now
-window.__onCloudReady = () => { window.__cloudReady=true; clearTimeout(cloudWaitTimer); if(document.readyState!=='loading') unlockOK(); };
-window.__onCloudError = msg => { if(!window.__cloudReady && window.__fbAuth==='in' && document.readyState!=='loading') showCloudWait('error', msg); };
-window.__onSignedOut = () => { SYNC_ENABLED=false; window.__fbAuth='out'; window.__cloudReady=false; window.__setSync('off'); if(document.readyState!=='loading') lockApp(); };
+window.__onSignedOut = () => {
+  window.__fbAuth='out'; window.__cloudReady=false; window.__fbUserEmail='';
+  try{ localStorage.removeItem(LS.signedIn); }catch(e){}
+  whenBooted(()=>{ lockApp(); updatePill(); });
+};
+window.__setConn = c => { CONN=!!c; whenBooted(updatePill); };
+window.__onCloudError = msg => { SYNC_ERR=msg||'Sync error'; whenBooted(updatePill); };
+window.__onFbInitFailed = () => whenBooted(()=>{ SLOW=true; updatePill(); showStartFail(); });
 
 document.addEventListener('DOMContentLoaded',boot);
 </script>
 
 <!-- ===================== Secured Firebase sync (dedicated project; email/password auth) =====================
-     Paste the config from YOUR OWN dedicated Firebase project between the markers below.
-     Until a real apiKey is present, the app runs 100% local (no cloud, local passcode gate). -->
+     Config lives in window.RD_FB_CONFIG near the top. The data listener attaches only AFTER sign-in.
+     Saves are per-field multi-path update() patches (see persist()); sw.js caches this SDK for offline launches. -->
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js';
-import { getDatabase, ref, set, onValue } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js';
+import { getDatabase, ref, update, onValue } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js';
 
-/* === FIREBASE_CONFIG_START === repair-desk-3bc6a (dedicated project, email/password auth) === */
-const firebaseConfig = {
-  apiKey: "AIzaSyBrSBEyAYC5fksywLUvfhUYvtd1DF-srHc",
-  authDomain: "repair-desk-3bc6a.firebaseapp.com",
-  databaseURL: "https://repair-desk-3bc6a-default-rtdb.firebaseio.com",
-  projectId: "repair-desk-3bc6a",
-  storageBucket: "repair-desk-3bc6a.firebasestorage.app",
-  messagingSenderId: "666491861373",
-  appId: "1:666491861373:web:71d1c2c6f1df6da8d97414"
-};
-/* === FIREBASE_CONFIG_END === */
-
-const configured = firebaseConfig.apiKey && !/PASTE/.test(firebaseConfig.apiKey) && !/PASTE/.test(firebaseConfig.databaseURL||'');
-if(configured){
-  window.__fbConfigured = true;
+if(typeof fbMode==='function' && fbMode()){
   try{
-    const app = initializeApp(firebaseConfig);
+    const app = initializeApp(window.RD_FB_CONFIG);
     const auth = getAuth(app);
     const db = getDatabase(app);
     const node = ref(db, 'repairdesk/main');
-    let echo = false, pushedInitial = false, unsub = null;
+    let unsub = null;
 
     try{ await setPersistence(auth, browserLocalPersistence); }catch(e){}
 
     window.__fbSignIn  = (email,pw) => signInWithEmailAndPassword(auth, email, pw);
     window.__fbSignOut = () => signOut(auth);
-    window.__fbWrite = obj => {
-      if(!auth.currentUser) return;
-      echo = true;
-      set(node, obj).catch(e=>{ console.warn('fb write',e); window.__setSync&&window.__setSync('err'); })
-                    .finally(()=>{ setTimeout(()=>{ echo=false; }, 500); });
-    };
+    window.__fbWrite = patch => auth.currentUser
+      ? update(node, patch)
+      : Promise.reject(Object.assign(new Error('not signed in'), { code:'not-signed-in' }));
+
+    onValue(ref(db, '.info/connected'), s => window.__setConn(s.val() === true));   // local connection flag, not data
 
     onAuthStateChanged(auth, user => {
+      if(unsub){ try{ unsub(); }catch(e){} unsub = null; }
       if(user){
-        window.__onSignedIn && window.__onSignedIn(user);
-        let ready = false;
-        if(unsub){ try{ unsub(); }catch(e){} }
+        window.__onSignedIn(user);
+        let first = true;
         unsub = onValue(node, snap => {
-          if(echo && ready) return;              // ignore our own write echo
           const v = snap.val();
-          if(v){ window.__applyRemote && window.__applyRemote(v); }
-          else if(!pushedInitial){ pushedInitial=true; try{ window.__fbWrite(window.__getState()); }catch(e){} } // seed empty cloud from local
-          window.__setSync && window.__setSync('on');
-          if(!ready){ ready = true; window.__onCloudReady && window.__onCloudReady(); }
-        }, err => { console.warn('fb read',err); window.__setSync && window.__setSync('err'); window.__onCloudError && window.__onCloudError(err && err.code ? String(err.code) : 'Sync error'); });
+          if(v) window.__applyRemote(v);
+          if(first){ first = false; window.__onCloudReady(!v); }
+        }, err => { console.warn('fb read', err); window.__onCloudError(err && err.code ? String(err.code) : 'Sync error'); });
       } else {
-        if(unsub){ try{ unsub(); }catch(e){} unsub = null; }
-        window.__onSignedOut && window.__onSignedOut();
+        window.__onSignedOut();
       }
     });
-  }catch(e){ console.warn('Firebase init failed',e); window.__fbConfigured=false; }
+  }catch(e){ console.warn('Firebase init failed', e); window.__onFbInitFailed(); }
 }
 </script>
 </body>
