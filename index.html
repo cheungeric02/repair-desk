@@ -166,6 +166,13 @@ main{padding:14px 16px 90px;max-width:1200px;margin:0 auto}
   .pitem .f-pn,.pitem .f-desc{grid-column:auto}
   .pitem .f-status{grid-column:1/2} .pitem .f-track{grid-column:2/-1}
 }
+/* payment rows */
+.payitem{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.payitem .f-note{grid-column:1/-1}
+.payitem .ptag{grid-column:1/-1;font-size:12px;font-weight:800;color:var(--good)}
+@media(min-width:620px){ .payitem{grid-template-columns:110px 150px 140px 1fr} .payitem .f-note{grid-column:auto} }
+#prepaidBox{margin:-4px 0 10px 26px}
+.totrow.due{font-weight:800;color:var(--good)}
 .chk{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;font-size:14px;font-weight:600;margin:4px 0 10px;cursor:pointer}
 .chk .chkt{flex:1;min-width:0}
 .chk input{flex:none}
@@ -296,6 +303,7 @@ main{padding:14px 16px 90px;max-width:1200px;margin:0 auto}
         <div class="field"><label>Labour rate (per hour)</label><input id="set_labour" type="number" min="0" step="1"></div>
         <div class="field"><label>Mileage rate (per km, expense)</label><input id="set_mileage" type="number" min="0" step="0.01"></div>
         <div class="field"><label>Tax rate on quotes (%)</label><input id="set_tax" type="number" min="0" step="0.5"></div>
+        <div class="field"><label>Credit card fee (%)</label><input id="set_cardfee" type="number" min="0" step="0.1"></div>
       </div>
       <button class="btn pri" id="saveSettings" style="margin-top:12px">Save settings</button>
     </div></div>
@@ -330,7 +338,8 @@ main{padding:14px 16px 90px;max-width:1200px;margin:0 auto}
       <p><b>Paste text/email:</b> top-right button — paste a customer SMS or email and the app pulls out name, phone, address and the problem into a new draft you confirm.</p>
       <p><b>Scheduling:</b> add one or more appointments to a job (evaluation, repair, follow-up). Each has an <b>Add to calendar</b> button (downloads an .ics that imports into Google/Outlook/Apple Calendar) and a Google Calendar quick-add link.</p>
       <p><b>Estimate:</b> labour + parts + wall mount + travel (+ tax) is what you share with the customer. Travel is on the estimate when <b>Include travel on the customer estimate</b> is ticked; the same travel lines still make up the company expense claim. <b>Internal notes</b> never go on the quote.</p>
-      <p><b>Payment:</b> record paid / amount / date / method in the job; paid jobs show a 💵 badge, finished-but-unpaid ones show ⚠ Unpaid.</p>
+      <p><b>Credit card fee:</b> tick <b>Paying by credit card</b> in the estimate to add the fee (5% by default, change it in Settings) on top of the whole total.</p>
+      <p><b>Payments:</b> add as many as you need (e.g. evaluation fee up front, repair at the end) — the job shows total paid and the balance owing. A <b>prepaid</b> amount ticked in the estimate is taken off the quote total so the customer sees the balance due. Paid jobs show 💵, part-paid ones show what's due, finished-but-unpaid ones show ⚠ Unpaid.</p>
       <p><b>Google Maps:</b> 🧭 buttons (job card, job editor, schedule, map pins) open Google Maps directions — on your phone they open the Google Maps app.</p>
       <p><b>Copy for ServiceBench / Salesforce:</b> the 📋 button beside each field copies just that value.</p>
     </div></div>
@@ -393,11 +402,18 @@ window.RD_FB_CONFIG = {
 </script>
 <script>
 /* ===================== Repair Desk — app logic ===================== */
-const APP_VERSION = 4;   // MUST equal the cache number in sw.js (rd-shell-vN)
+const APP_VERSION = 5;   // MUST equal the cache number in sw.js (rd-shell-vN)
 const LS = { data:'repairdesk_data', theme:'repairdesk_theme', admin:'repairdesk_admin', seen:'repairdesk_lastSeenVer',
              outbox:'repairdesk_outbox', signedIn:'repairdesk_signedIn' };
 
 const PATCH_NOTES = [
+  { v:5, date:'2026-11-27', title:'Card fee, prepaid & multiple payments', notes:[
+    'New “Paying by credit card” tick box on the estimate adds a card fee on top of the whole total (5% — change it in Settings).',
+    'New “Customer has already prepaid” tick box: enter the amount and it is taken off the total, so the quote shows the prepaid amount and the balance due.',
+    'Payments are now a list — record the evaluation fee, the final repair charge and anything in between. Each job shows total paid and the balance owing.',
+    '“Paid in full” tick box: ticking it with money still owing adds the balance as today’s payment.',
+    'The quote now shows one Labour amount instead of hours × rate.'
+  ]},
   { v:4, date:'2026-11-22', title:'Estimates, payments & Google Maps', notes:[
     'New statuses after Evaluated: To be estimated → Estimate approved → Parts to be ordered.',
     'Parts now live inside the estimate (one list with part #, price, status and tracking). Parts can be “To order”, “Ordered” or “Arrived” — ordering a part moves the job to Parts ordered, and once every part has arrived it moves to Parts arrived.',
@@ -473,7 +489,7 @@ async function copyText(str,label){
 }
 
 /* ---- state ---- */
-const DEFAULT_SETTINGS = { tech:'', currency:'$', labourRate:120, mileageRate:0.70, taxRate:13, pwHash:'' };
+const DEFAULT_SETTINGS = { tech:'', currency:'$', labourRate:120, mileageRate:0.70, taxRate:13, cardFeePct:5, pwHash:'' };
 let STATE = { jobs:{}, settings:{...DEFAULT_SETTINGS} };
 let activeStatus='all', activeSched='upcoming', editingId=null, map=null, markers={}, mapInited=false;
 
@@ -487,8 +503,8 @@ function newJob(seed={}){
     lat:null, lng:null, geoQuery:'',
     appts:[], parts:[],
     estLabourHours:'', estParts:[], estNotes:'', estInternal:'', wallMount:'', invoiceNo:'',
-    travel:[], travelOnEstimate:true,
-    paid:false, paidAmount:'', paidDate:'', paidMethod:'',
+    travel:[], travelOnEstimate:true, cardFee:false,
+    payments:[], paid:false,
     diagnosis:'', repairNotes:'', closedDate:'',
     log:[], createdAt:Date.now(), updatedAt:Date.now()
   }, seed);
@@ -598,6 +614,7 @@ function normalize(){
     j.parts=Array.isArray(j.parts)?j.parts:[];
     j.estParts=Array.isArray(j.estParts)?j.estParts:[];
     j.travel=Array.isArray(j.travel)?j.travel:[];
+    j.payments=Array.isArray(j.payments)?j.payments.filter(p=>p&&typeof p==='object'):[];
     j.log=Array.isArray(j.log)?j.log:[];
     if(!STATUSES.some(s=>s.k===j.status)) j.status='new';
     if(typeof j.lat!=='number') j.lat=null;
@@ -625,14 +642,35 @@ function mergedParts(j){
 }
 const lineTotal = p => (+p.qty||0)*(+p.price||0);
 const travelIncluded = j => j.travelOnEstimate!==false;   // older jobs (no flag) include travel
+const r2 = n => Math.round((+n||0)*100)/100;
+/* payments: a list of {amount,date,method,note,prepaid}. Older jobs kept one paidAmount/paidDate/paidMethod — it is
+   shown as a single payment here and folded into j.payments the next time the job is saved. */
+function paymentsOf(j){
+  const arr=(Array.isArray(j.payments)?j.payments:[]).map(p=>Object.assign({amount:'',date:'',method:'',note:'',prepaid:false},p));
+  if(!arr.length && j.paidAmount!=='' && j.paidAmount!=null && !isNaN(+j.paidAmount))
+    arr.push({id:uid(), amount:+j.paidAmount, date:j.paidDate||'', method:j.paidMethod||'', note:'', prepaid:false});
+  return arr;
+}
+const sumPay = arr => r2(arr.reduce((s,p)=>s+(+p.amount||0),0));
 function estimateOf(j){
   const hours=+j.estLabourHours||0;
-  const labour=hours*(+STATE.settings.labourRate||0);
-  const parts=mergedParts(j).reduce((s,p)=>s+lineTotal(p),0);
-  const wall=+j.wallMount||0;
-  const travel=travelIncluded(j) ? travelTotalFor(j) : 0;
-  const sub=labour+parts+wall+travel, tax=sub*(+STATE.settings.taxRate||0)/100;
-  return {hours,labour,parts,wall,travel,sub,tax,total:sub+tax};
+  const labour=r2(hours*(+STATE.settings.labourRate||0));
+  const parts=r2(mergedParts(j).reduce((s,p)=>s+lineTotal(p),0));
+  const wall=r2(j.wallMount);
+  const travel=travelIncluded(j) ? r2(travelTotalFor(j)) : 0;
+  const sub=r2(labour+parts+wall+travel), tax=r2(sub*(+STATE.settings.taxRate||0)/100);
+  const cardPct = j.cardFee ? (+STATE.settings.cardFeePct||0) : 0;
+  const fee=r2((sub+tax)*cardPct/100);           // the card fee goes on top of the whole total (after tax)
+  const total=r2(sub+tax+fee);
+  const pays=paymentsOf(j);
+  const prepaid=sumPay(pays.filter(p=>p.prepaid)), paid=sumPay(pays);
+  return {hours,labour,parts,wall,travel,sub,tax,cardPct,fee,total,prepaid,due:r2(total-prepaid),paid,balance:r2(total-paid)};
+}
+/* paid in full = ticked by hand, or the payments cover the estimate total */
+function payState(j){
+  const t=estimateOf(j);
+  const full = !!j.paid || (t.total>0 && t.paid>=t.total-0.005);
+  return {full, paid:t.paid, balance:Math.max(0,t.balance), total:t.total};
 }
 function jobEstimateTotal(j){ return estimateOf(j).total; }
 function travelTotalFor(j){ return (j.travel||[]).reduce((s,t)=> s + (t.amount!==''&&t.amount!=null?(+t.amount||0):(+t.km||0)*(+t.rate||0)),0); }
@@ -731,7 +769,9 @@ function renderJobs(){
         ${j.address?`<span>📍 ${esc(j.address.slice(0,40))} <a class="navlink" href="${esc(gmapsDir(j.address))}" target="_blank" rel="noopener" data-stop title="Directions in Google Maps">🧭</a></span>`:''}
         ${nextAppt?`<span>🗓️ <b>${esc(fmtDate(nextAppt.date))} ${esc(fmt12(nextAppt.time))}</b></span>`:''}
         ${parts.length?`<span>🔩 ${parts.filter(p=>p.status==='arrived').length}/${parts.length} parts in</span>`:''}
-        ${j.paid?`<span class="paidtag">💵 Paid${j.paidAmount!==''&&j.paidAmount!=null?(' '+esc(money(j.paidAmount))):''}</span>`:(j.status==='completed'?'<span class="unpaidtag">⚠ Unpaid</span>':'')}
+        ${(ps=>ps.full?`<span class="paidtag">💵 Paid${ps.paid?(' '+esc(money(ps.paid))):''}</span>`
+            : ps.paid?`<span class="paidtag">💵 ${esc(money(ps.paid))} paid</span>${ps.balance?` <span class="${j.status==='completed'?'unpaidtag':''}">· ${esc(money(ps.balance))} due</span>`:''}`
+            : (j.status==='completed'?'<span class="unpaidtag">⚠ Unpaid</span>':''))(payState(j))}
       </div>
     </div>`;
   }).join('');
@@ -809,7 +849,7 @@ function jobForm(j){
   </div></details>
 
   <details class="sec"><summary>💲 Estimate &amp; parts</summary><div class="inner">
-    <div class="callout">Labour, parts, wall mount and (if ticked below) travel make up the <b>customer quote</b>. Part status moves the job: <b>Ordered</b> → Parts ordered, all <b>Arrived</b> → Parts arrived.</div>
+    <div class="callout">Labour, parts, wall mount and (if ticked below) travel make up the <b>customer quote</b> — the customer sees one <b>Labour</b> amount, not the hours. Part status moves the job: <b>Ordered</b> → Parts ordered, all <b>Arrived</b> → Parts arrived.</div>
     <div class="grid2">
       <div class="field"><label>Estimated labour (hours)</label><input id="f_estHours" type="number" min="0" step="0.25" value="${esc(j.estLabourHours)}"></div>
       <div class="field"><label>Wall mount (price, blank = none)</label><input id="f_wallMount" type="number" min="0" step="0.01" value="${esc(j.wallMount??'')}" placeholder="e.g. 149.99"></div>
@@ -818,6 +858,13 @@ function jobForm(j){
     <div id="partList"></div>
     <button type="button" class="btn sm" id="addPart">＋ Add part</button>
     <label class="chk" style="margin-top:12px"><input type="checkbox" id="f_travelOnEst" ${travelIncluded(j)?'checked':''}><span class="chkt">Include travel on the customer estimate</span><span class="hint">(travel lines are in the 🚗 Travel section)</span></label>
+    <label class="chk"><input type="checkbox" id="f_cardFee" ${j.cardFee?'checked':''}><span class="chkt">Paying by credit card (+${esc(+STATE.settings.cardFeePct||0)}% fee)</span><span class="hint">(added on top of the whole total — change the % in Settings)</span></label>
+    <label class="chk"><input type="checkbox" id="f_prepaidOn"><span class="chkt">Customer has already prepaid</span><span class="hint">(taken off the total so the quote shows the balance; also listed under 💵 Payments)</span></label>
+    <div id="prepaidBox" class="grid2" hidden>
+      <div class="field"><label>Prepaid amount</label><input id="f_ppAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+      <div class="field"><label>Date</label><input id="f_ppDate" type="date"></div>
+      <div class="field"><label>Method</label><select id="f_ppMethod">${PAY_METHODS.map(m=>`<option value="${esc(m)}">${esc(m||'—')}</option>`).join('')}</select></div>
+    </div>
     ${fld('Notes to customer (on the quote)','f_estNotes',j.estNotes,{type:'textarea',full:true})}
     <div style="margin-top:10px">${fld('🔒 Internal notes (never on the quote)','f_estInternal',j.estInternal,{type:'textarea',full:true,ph:'cost, supplier, approval details…'})}</div>
     <div id="estTotals" style="margin-top:10px"></div>
@@ -832,12 +879,13 @@ function jobForm(j){
     <button type="button" class="btn" id="copyExpense" style="margin-top:8px">📋 Copy expense claim</button>
   </div></details>
 
-  <details class="sec" ${j.paid?'open':''}><summary>💵 Payment</summary><div class="inner"><div class="grid2">
-    <div class="field"><label>Paid?</label><select id="f_paid"><option value="">Not paid</option><option value="1" ${j.paid?'selected':''}>Paid</option></select></div>
-    <div class="field"><label>Amount paid</label><input id="f_paidAmount" type="number" min="0" step="0.01" value="${esc(j.paidAmount??'')}" placeholder="${esc((+jobEstimateTotal(j)).toFixed(2))}"></div>
-    <div class="field"><label>Date paid</label><input id="f_paidDate" type="date" value="${esc(j.paidDate||'')}"></div>
-    <div class="field"><label>Method</label><select id="f_paidMethod">${PAY_METHODS.map(m=>`<option value="${esc(m)}" ${(j.paidMethod||'')===m?'selected':''}>${esc(m||'—')}</option>`).join('')}</select></div>
-  </div></div></details>
+  <details class="sec" ${(j.paid||paymentsOf(j).length)?'open':''}><summary>💵 Payments</summary><div class="inner">
+    <div class="callout">Add each payment as it comes in — e.g. the evaluation charge up front, then the repair at the end.</div>
+    <div id="payList"></div>
+    <button type="button" class="btn sm" id="addPay">＋ Add payment</button>
+    <div id="payTotals" style="margin-top:10px"></div>
+    <label class="chk" style="margin-top:8px"><input type="checkbox" id="f_paid" ${j.paid?'checked':''}><span class="chkt">Paid in full</span><span class="hint">(ticking it with a balance left adds that balance as a payment)</span></label>
+  </div></details>
 
   <details class="sec"><summary>🛠️ Work performed</summary><div class="inner"><div class="grid2">
     ${fld('Diagnosis','f_diagnosis',j.diagnosis,{type:'textarea',full:true})}
@@ -854,9 +902,10 @@ function wireJobForm(j){
     appts: JSON.parse(JSON.stringify(j.appts||[])),
     parts: JSON.parse(JSON.stringify(mergedParts(j))),   // repair parts + old quote-only lines, as one list
     travel: JSON.parse(JSON.stringify(j.travel||[])),
+    payments: JSON.parse(JSON.stringify(paymentsOf(j))),   // includes an older single paid amount, as one payment
     lat:j.lat, lng:j.lng
   };
-  renderAppts(); renderParts(); renderTravel(); renderEstTotals(); renderTravelTotal();
+  renderAppts(); renderParts(); renderTravel(); renderPrepaid(); renderPayments(); renderEstTotals(); renderTravelTotal();
 
   $('#addAppt').onclick=()=>{ draft.appts.push({id:uid(),type:'evaluation',date:todayISO(),time:'09:00',duration:60,confirmed:false,notes:''}); renderAppts(); };
   $('#addPart').onclick=()=>{ draft.parts.push({id:uid(),pn:'',desc:'',qty:1,price:'',status:'to_order',track:''}); renderParts(); renderEstTotals(); };
@@ -864,6 +913,22 @@ function wireJobForm(j){
   $('#f_estHours').oninput=renderEstTotals;
   $('#f_wallMount').oninput=renderEstTotals;
   $('#f_travelOnEst').onchange=renderEstTotals;
+  $('#f_cardFee').onchange=renderEstTotals;
+  $('#f_prepaidOn').onchange=()=>{
+    if($('#f_prepaidOn').checked){
+      if(!draft.payments.some(p=>p.prepaid)) draft.payments.unshift({id:uid(),amount:'',date:todayISO(),method:'',note:'Prepaid',prepaid:true});
+    } else draft.payments=draft.payments.filter(p=>!p.prepaid);
+    renderPrepaid(); renderPayments(); renderEstTotals();
+    if($('#f_prepaidOn').checked) $('#f_ppAmount').focus();
+  };
+  [['f_ppAmount','amount'],['f_ppDate','date'],['f_ppMethod','method']].forEach(([id,k])=>{
+    const e=$('#'+id); e[e.tagName==='SELECT'?'onchange':'oninput']=()=>{
+      const p=draft.payments.find(x=>x.prepaid); if(!p) return;
+      p[k] = k==='amount' ? (e.value===''?'':(+e.value||0)) : e.value;
+      renderPayments(); renderEstTotals();
+    };
+  });
+  $('#addPay').onclick=()=>{ draft.payments.push({id:uid(),amount:'',date:todayISO(),method:'',note:'',prepaid:false}); renderPayments(); };
   $('#copyQuote').onclick=()=>copyText(buildQuoteText(readForm(j)),'Quote');
   $('#copyExpense').onclick=()=>copyText(buildExpenseText(readForm(j)),'Expense claim');
   $('#f_geocode').onclick=()=>geocodeEditor(j);
@@ -874,7 +939,15 @@ function wireJobForm(j){
   const invPh=()=>{ $('#f_invoiceNo').placeholder = genInvoice({id:j.id, createdAt:j.createdAt, phone:$('#f_phone').value, received:$('#f_received').value}) || 'add a phone number'; };
   $('#f_phone').addEventListener('input',invPh); $('#f_received').addEventListener('input',invPh);
   // marking it paid fills today's date and the estimate total if they're blank
-  $('#f_paid').onchange=()=>{ if($('#f_paid').value){ if(!$('#f_paidDate').value) $('#f_paidDate').value=todayISO(); if($('#f_paidAmount').value==='') $('#f_paidAmount').value=(+jobEstimateTotal(readForm(j))).toFixed(2); } };
+  // ticking "Paid in full" with money still owing records that balance as today's payment
+  $('#f_paid').onchange=()=>{
+    if(!$('#f_paid').checked) return;
+    const jf=readForm(j), t=estimateOf(jf);
+    if(t.balance>0.005){
+      draft.payments.push({id:uid(),amount:t.balance,date:todayISO(),method:jf.cardFee?'Credit card':'',note:'Balance',prepaid:false});
+      renderPayments(); toast('Added a '+money(t.balance)+' payment for the balance');
+    }
+  };
   // copy buttons
   $$('#jobBody .copybtn').forEach(b=>b.onclick=()=>{ const v=b.closest('.inwrap').querySelector('input,textarea'); copyText((v?v.value:b.dataset.copy)||'', b.dataset.label); });
 }
@@ -962,7 +1035,42 @@ function renderEstTotals(){
     ${travelIncluded(jf)?`<div class="totrow"><span>Travel</span><span>${money(t.travel)}</span></div>`:`<div class="totrow hint"><span>Travel (not on this estimate)</span><span>—</span></div>`}
     <div class="totrow"><span>Subtotal</span><span>${money(t.sub)}</span></div>
     <div class="totrow"><span>Tax (${STATE.settings.taxRate}%)</span><span>${money(t.tax)}</span></div>
-    <div class="totrow big"><span>Estimate total</span><span>${money(t.total)}</span></div>`;
+    ${t.cardPct?`<div class="totrow"><span>Credit card fee (${t.cardPct}%)</span><span>${money(t.fee)}</span></div>`:''}
+    <div class="totrow big"><span>Estimate total</span><span>${money(t.total)}</span></div>
+    ${t.prepaid?`<div class="totrow"><span>Prepaid</span><span>−${money(t.prepaid)}</span></div>
+    <div class="totrow big due"><span>Balance due</span><span>${money(t.due)}</span></div>`:''}`;
+  renderPayTotals();
+}
+function renderPrepaid(){
+  const p=draft.payments.find(x=>x.prepaid);
+  $('#f_prepaidOn').checked=!!p; $('#prepaidBox').hidden=!p;
+  if(p){ $('#f_ppAmount').value=p.amount??''; $('#f_ppDate').value=p.date||''; $('#f_ppMethod').value=p.method||''; }
+}
+function renderPayments(){
+  const el=$('#payList');
+  el.innerHTML = draft.payments.map((p,i)=>`<div class="litem payitem">
+    ${p.prepaid?`<div class="ptag">Prepaid · shown on the estimate</div>`:''}
+    <div class="field"><label>Amount</label><input type="number" min="0" step="0.01" inputmode="decimal" data-py="amount" data-i="${i}" value="${esc(p.amount??'')}" placeholder="0.00"></div>
+    <div class="field"><label>Date</label><input type="date" data-py="date" data-i="${i}" value="${esc(p.date||'')}"></div>
+    <div class="field"><label>Method</label><select data-py="method" data-i="${i}">${PAY_METHODS.map(m=>`<option value="${esc(m)}" ${(p.method||'')===m?'selected':''}>${esc(m||'—')}</option>`).join('')}</select></div>
+    <div class="field f-note"><label>Note</label><div class="inwrap"><input data-py="note" data-i="${i}" value="${esc(p.note||'')}" placeholder="e.g. evaluation fee"><button type="button" class="btn sm danger" data-delpy="${i}" title="Remove payment">✕</button></div></div>
+  </div>`).join('') || `<p class="hint">No payments yet.</p>`;
+  el.querySelectorAll('[data-py]').forEach(inp=>{
+    inp[inp.tagName==='SELECT'?'onchange':'oninput']=()=>{ const p=draft.payments[+inp.dataset.i], k=inp.dataset.py;
+      p[k] = k==='amount' ? (inp.value===''?'':(+inp.value||0)) : inp.value;
+      if(p.prepaid){ renderPrepaid(); renderEstTotals(); } else renderPayTotals();
+    };
+  });
+  el.querySelectorAll('[data-delpy]').forEach(b=>b.onclick=()=>{ draft.payments.splice(+b.dataset.delpy,1); renderPrepaid(); renderPayments(); renderEstTotals(); });
+  renderPayTotals();
+}
+function renderPayTotals(){
+  const el=$('#payTotals'); if(!el) return;
+  const t=estimateOf(readForm(STATE.jobs[editingId]||editBase||newJob()));
+  el.innerHTML=`
+    <div class="totrow"><span>Estimate total</span><span>${money(t.total)}</span></div>
+    <div class="totrow"><span>Total paid${draft.payments.length>1?` (${draft.payments.length} payments)`:''}</span><span>${money(t.paid)}</span></div>
+    <div class="totrow big"><span>${t.balance<-0.005?'Overpaid':'Balance owing'}</span><span>${money(Math.abs(t.balance))}</span></div>`;
 }
 function travelTotal(){ return draft.travel.reduce((s,t)=> s + (t.amount!==''&&t.amount!=null ? (+t.amount||0) : (+t.km||0)*(+t.rate||0)), 0); }
 function renderTravelTotal(){ $('#travelTotal').innerHTML=`<div class="totrow big"><span>Travel total</span><span>${money(travelTotal())}</span></div>`; if($('#estTotals')) renderEstTotals(); }
@@ -980,7 +1088,10 @@ function readForm(base){
   j.estLabourHours=g('f_estHours'); j.estNotes=g('f_estNotes').trim(); j.estInternal=g('f_estInternal').trim();
   j.wallMount=g('f_wallMount'); j.invoiceNo=g('f_invoiceNo').trim();
   const te=$('#f_travelOnEst'); if(te) j.travelOnEstimate=te.checked;
-  j.paid=!!g('f_paid'); j.paidAmount=g('f_paidAmount'); j.paidDate=g('f_paidDate'); j.paidMethod=g('f_paidMethod');
+  const cf=$('#f_cardFee'); if(cf) j.cardFee=cf.checked;
+  const pf=$('#f_paid'); if(pf) j.paid=pf.checked;
+  // payments are one list now; saving folds an older single paid amount into it
+  j.payments=draft.payments; j.paidAmount=''; j.paidDate=''; j.paidMethod='';
   j.diagnosis=g('f_diagnosis').trim(); j.repairNotes=g('f_repairNotes').trim(); j.closedDate=g('f_closedDate');
   // parts + old quote lines are now one list: saving folds the legacy estParts into parts
   j.appts=draft.appts; j.parts=draft.parts; j.estParts=[]; j.travel=draft.travel;
@@ -1025,7 +1136,7 @@ function buildQuoteText(j){
   if(j.jobId) L.push('Job ID: '+j.jobId);
   L.push('');
   if(j.issue){ L.push('Reported issue:'); L.push('  '+j.issue); L.push(''); }
-  L.push('Labour: '+t.hours+' hr @ '+money(STATE.settings.labourRate)+' = '+money(t.labour));
+  if(t.labour) L.push('Labour: '+money(t.labour));
   const priced=mergedParts(j).filter(p=>(+p.price||0) && (p.pn||p.desc));
   if(priced.length){ L.push('Parts:'); priced.forEach(p=>L.push('  - '+(p.desc||'part')+(p.pn?' ('+p.pn+')':'')+'  x'+(p.qty||1)+' @ '+money(p.price)+' = '+money(lineTotal(p)))); }
   if(t.wall) L.push('Wall mount: '+money(t.wall));
@@ -1033,7 +1144,9 @@ function buildQuoteText(j){
   L.push('');
   L.push('Subtotal: '+money(t.sub));
   L.push('Tax ('+STATE.settings.taxRate+'%): '+money(t.tax));
+  if(t.cardPct) L.push('Credit card fee ('+t.cardPct+'%): '+money(t.fee));
   L.push('TOTAL: '+money(t.total));
+  if(t.prepaid){ L.push('Prepaid: -'+money(t.prepaid)); L.push('BALANCE DUE: '+money(t.due)); }
   if(j.estNotes){ L.push(''); L.push('Notes: '+j.estNotes); }
   return L.join('\n');
 }
@@ -1298,12 +1411,13 @@ function showParsePreview(o){
 
 /* ===================== EXPORT ===================== */
 function exportCSV(){
-  const cols=['Invoice #','Service Job ID','Service Order #','Case #','Status','Customer','Phone','Email','Address','Model','Serial','Issue','Received','Next appt','Wall mount','Estimate total','Travel total','Travel on estimate','Paid','Paid amount','Paid date','Paid method'];
+  const cols=['Invoice #','Service Job ID','Service Order #','Case #','Status','Customer','Phone','Email','Address','Model','Serial','Issue','Received','Next appt','Wall mount','Estimate total','Travel total','Travel on estimate','Card fee','Prepaid','Total paid','Balance','Paid in full','Payments'];
   const rows=jobsArr().map(j=>{
-    const t=jobEstimateTotal(j); const na=upcomingApptOf(j);
+    const e=estimateOf(j), t=e.total, ps=payState(j); const na=upcomingApptOf(j);
     return [invoiceFor(j),j.jobId,j.serviceOrder,j.caseNo,statusMeta(j.status).label,j.customer,j.phone,j.email,j.address,j.model,j.serial,
       (j.issue||'').replace(/\s+/g,' '), j.received, na?(fmtDate(na.date)+' '+fmt12(na.time)):'', j.wallMount?(+j.wallMount).toFixed(2):'', t.toFixed(2), travelTotalFor(j).toFixed(2),
-      travelIncluded(j)?'Yes':'No', j.paid?'Yes':'No', j.paidAmount??'', j.paidDate||'', j.paidMethod||''];
+      travelIncluded(j)?'Yes':'No', e.fee?e.fee.toFixed(2):'', e.prepaid?e.prepaid.toFixed(2):'', e.paid.toFixed(2), e.balance.toFixed(2), ps.full?'Yes':'No',
+      paymentsOf(j).map(p=>[p.date,p.method,(+p.amount||0).toFixed(2),p.prepaid?'prepaid':p.note].filter(Boolean).join(' ')).join('; ')];
   });
   const csv=[cols,...rows].map(r=>r.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(',')).join('\r\n');
   const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a');
@@ -1415,13 +1529,14 @@ function fillSettings(){
   settingsDirty=false;
   const s=STATE.settings;
   $('#set_tech').value=s.tech||''; $('#set_cur').value=s.currency||'$';
-  $('#set_labour').value=s.labourRate; $('#set_mileage').value=s.mileageRate; $('#set_tax').value=s.taxRate;
+  $('#set_labour').value=s.labourRate; $('#set_mileage').value=s.mileageRate; $('#set_tax').value=s.taxRate; $('#set_cardfee').value=s.cardFeePct;
   $('#pwState').textContent = s.pwHash ? 'A passcode is set. Enter a new one to change it, or clear both boxes and save to remove it.' : 'No passcode set — the app opens without a lock.';
 }
 function saveSettings(){
   const s=STATE.settings;
   s.tech=$('#set_tech').value.trim(); s.currency=$('#set_cur').value.trim()||'$';
   s.labourRate=+$('#set_labour').value||0; s.mileageRate=+$('#set_mileage').value||0; s.taxRate=+$('#set_tax').value||0;
+  s.cardFeePct=+$('#set_cardfee').value||0;
   settingsDirty=false; persist(); toast('Settings saved');
 }
 async function savePw(){
